@@ -1,0 +1,26 @@
+[settings]
+workspace = "/tmp/test-workspace"
+maven_central_max_wait = "30m"
+maven_central_poll_interval = "15s"
+
+[library.kiwi-parent]
+repo = "kiwiproject/kiwi-parent"
+type = "parent-pom"
+depends_on = []
+
+[library.kiwi-bom]
+repo = "kiwiproject/kiwi-bom"
+type = "bom"
+depends_on = ["kiwi-parent"]
+
+[library.kiwi]
+repo = "kiwiproject/kiwi"
+depends_on = ["kiwi-parent", "kiwi-bom"]
+
+[library.kiwi-libraries-bom]
+repo = "kiwiproject/kiwi-libraries-bom"
+type = "bom-aggregator"
+depends_on = ["kiwi"]
+
+[release.overrides]
+kiwi = "3.0.0"
