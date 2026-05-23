@@ -8,6 +8,8 @@ import (
 
 var version = "dev"
 
+var configPath string
+
 var rootCmd = &cobra.Command{
 	Use:   "kiwi-star-deployer",
 	Short: "Automates kiwiproject library releases in dependency order",
@@ -21,4 +23,5 @@ func Execute() {
 
 func init() {
 	rootCmd.Version = version
+	rootCmd.PersistentFlags().StringVar(&configPath, "config", "kiwi-star-deployer.toml", "path to config file")
 }

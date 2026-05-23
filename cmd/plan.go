@@ -1,18 +1,36 @@
 package cmd
 
 import (
-	"fmt"
+	"os"
 
+	"github.com/kiwiproject/kiwi-star-deployer/internal/config"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/plan"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/runner"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
 var planCmd = &cobra.Command{
 	Use:   "plan",
 	Short: "Print release stages, ordering, and resolved versions",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("not yet implemented")
-		return nil
-	},
+	RunE:  runPlan,
+}
+
+func runPlan(_ *cobra.Command, _ []string) error {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return err
+	}
+
+	ws := workspace.New(cfg.Settings.Workspace, runner.NewOsRunner())
+
+	stages, err := plan.Build(cfg, ws)
+	if err != nil {
+		return err
+	}
+
+	plan.Print(os.Stdout, stages)
+	return nil
 }
 
 func init() {
