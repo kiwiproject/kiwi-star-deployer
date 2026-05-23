@@ -1,16 +1,15 @@
+version: "2"
+
 linters:
   enable:
     - errcheck      # unhandled errors
-    - gosimple      # simplification suggestions
     - govet         # same as go vet
     - ineffassign   # assignments whose values are never used
-    - staticcheck   # broad static analysis (bugs, performance, style)
+    - staticcheck   # broad static analysis (bugs, performance, style; includes gosimple)
     - unused        # unused code
-
-linters-settings:
-  errcheck:
-    # Ignore errors from fmt.Fprintf and fmt.Fprintln (console output).
-    exclude-functions:
-      - fmt.Fprintf
-      - fmt.Fprintln
-      - fmt.Fprint
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Fprint
