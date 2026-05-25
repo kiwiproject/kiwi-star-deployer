@@ -1,5 +1,6 @@
 [settings]
 workspace = "/tmp/test-workspace"
+group_id = "org.example"
 maven_central_max_wait = "30m"
 maven_central_poll_interval = "15s"
 

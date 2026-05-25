@@ -3,8 +3,10 @@ package release_test
 import (
 	"bytes"
 	"errors"
+	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kiwiproject/kiwi-star-deployer/internal/plan"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/release"
@@ -12,6 +14,21 @@ import (
 	"github.com/kiwiproject/kiwi-star-deployer/internal/version"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/workspace"
 )
+
+type fakeCentral struct{ err error }
+
+func (f *fakeCentral) Wait(_ io.Writer, _, _, _ string, _, _ time.Duration) error {
+	return f.err
+}
+
+func defaultOpts() release.Options {
+	return release.Options{
+		GroupID:      "org.kiwiproject",
+		MaxWait:      time.Minute,
+		PollInterval: time.Second,
+		Checker:      &fakeCentral{},
+	}
+}
 
 func mustPlan(name, pomVersion, override string) version.Plan {
 	vp, err := version.Compute(name, pomVersion, override)
@@ -37,20 +54,19 @@ func TestExecute_singleLibrarySuccess(t *testing.T) {
 	ws := workspace.New(dir, &runner.FakeRunner{})
 
 	fr := &runner.FakeRunner{}
-	fr.AddResponse(&runner.Result{}, nil) // mvn clean
-	fr.AddResponse(&runner.Result{}, nil) // mvn release
+	fr.AddResponse(&runner.Result{}, nil) // single mvn invocation
 
 	stages := makeStages(
 		plan.Entry{Name: "kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
 	)
 
 	var buf bytes.Buffer
-	err := release.Execute(&buf, stages, ws, fr, t.TempDir())
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), defaultOpts())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if fr.CallCount() != 2 {
-		t.Errorf("expected 2 runner calls, got %d", fr.CallCount())
+	if fr.CallCount() != 1 {
+		t.Errorf("expected 1 runner call, got %d", fr.CallCount())
 	}
 	out := buf.String()
 	if !strings.Contains(out, "done") {
@@ -66,7 +82,7 @@ func TestExecute_multipleStages(t *testing.T) {
 	ws := workspace.New(dir, &runner.FakeRunner{})
 
 	fr := &runner.FakeRunner{}
-	for range 4 { // 2 libraries × 2 mvn calls each
+	for range 2 { // 2 libraries × 1 mvn call each
 		fr.AddResponse(&runner.Result{}, nil)
 	}
 
@@ -76,7 +92,7 @@ func TestExecute_multipleStages(t *testing.T) {
 	)
 
 	var buf bytes.Buffer
-	err := release.Execute(&buf, stages, ws, fr, t.TempDir())
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), defaultOpts())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -94,7 +110,7 @@ func TestExecute_parallelWithinStage(t *testing.T) {
 	ws := workspace.New(dir, &runner.FakeRunner{})
 
 	fr := &runner.FakeRunner{}
-	for range 4 { // 2 libraries × 2 mvn calls each
+	for range 2 { // 2 libraries × 1 mvn call each
 		fr.AddResponse(&runner.Result{}, nil)
 	}
 
@@ -104,28 +120,28 @@ func TestExecute_parallelWithinStage(t *testing.T) {
 	)
 
 	var buf bytes.Buffer
-	err := release.Execute(&buf, stages, ws, fr, t.TempDir())
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), defaultOpts())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if fr.CallCount() != 4 {
-		t.Errorf("expected 4 runner calls, got %d", fr.CallCount())
+	if fr.CallCount() != 2 {
+		t.Errorf("expected 2 runner calls, got %d", fr.CallCount())
 	}
 }
 
-func TestExecute_mvnCleanFailureHalts(t *testing.T) {
+func TestExecute_mvnFailureHalts(t *testing.T) {
 	dir := t.TempDir()
 	ws := workspace.New(dir, &runner.FakeRunner{})
 
 	fr := &runner.FakeRunner{}
-	fr.AddResponse(nil, errors.New("exit status 1")) // mvn clean fails
+	fr.AddResponse(nil, errors.New("exit status 1"))
 
 	stages := makeStages(
 		plan.Entry{Name: "kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
 	)
 
 	var buf bytes.Buffer
-	err := release.Execute(&buf, stages, ws, fr, t.TempDir())
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), defaultOpts())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -140,7 +156,7 @@ func TestExecute_stageFailureHaltsBeforeNextStage(t *testing.T) {
 	ws := workspace.New(dir, &runner.FakeRunner{})
 
 	fr := &runner.FakeRunner{}
-	fr.AddResponse(nil, errors.New("exit status 1")) // stage 1 mvn clean fails
+	fr.AddResponse(nil, errors.New("exit status 1")) // stage 1 fails
 	// stage 2 should never run
 
 	stages := makeStages(
@@ -149,7 +165,7 @@ func TestExecute_stageFailureHaltsBeforeNextStage(t *testing.T) {
 	)
 
 	var buf bytes.Buffer
-	err := release.Execute(&buf, stages, ws, fr, t.TempDir())
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), defaultOpts())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -158,37 +174,65 @@ func TestExecute_stageFailureHaltsBeforeNextStage(t *testing.T) {
 	}
 }
 
-func TestExecute_verifyMvnArgs(t *testing.T) {
+func TestExecute_centralCheckFailureHalts(t *testing.T) {
 	dir := t.TempDir()
 	ws := workspace.New(dir, &runner.FakeRunner{})
 
 	fr := &runner.FakeRunner{}
-	fr.AddResponse(&runner.Result{}, nil) // mvn clean
-	fr.AddResponse(&runner.Result{}, nil) // mvn release
+	fr.AddResponse(&runner.Result{}, nil) // mvn succeeds
+
+	opts := release.Options{
+		GroupID:      "org.kiwiproject",
+		MaxWait:      time.Minute,
+		PollInterval: time.Second,
+		Checker:      &fakeCentral{err: errors.New("HTTP 404")},
+	}
 
 	stages := makeStages(
 		plan.Entry{Name: "kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
 	)
 
-	release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir()) //nolint:errcheck
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	out := buf.String()
+	if !strings.Contains(out, "FAILED") {
+		t.Errorf("expected FAILED in output:\n%s", out)
+	}
+}
 
-	cleanCall := fr.Calls[0]
-	if cleanCall.Command != "mvn" || cleanCall.Args[0] != "clean" {
-		t.Errorf("first call should be mvn clean, got: %s %v", cleanCall.Command, cleanCall.Args)
-	}
+func TestExecute_verifyMvnArgs(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &runner.FakeRunner{})
 
-	releaseCall := fr.Calls[1]
-	if releaseCall.Command != "mvn" {
-		t.Errorf("second call should be mvn, got: %s", releaseCall.Command)
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{}, nil)
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), defaultOpts()) //nolint:errcheck
+
+	call := fr.Calls[0]
+	if call.Command != "mvn" {
+		t.Errorf("expected mvn, got: %s", call.Command)
 	}
-	releaseArgs := strings.Join(releaseCall.Args, " ")
-	if !strings.Contains(releaseArgs, "release:prepare") {
-		t.Errorf("expected release:prepare in args: %s", releaseArgs)
-	}
-	if !strings.Contains(releaseArgs, "-DreleaseVersion=2.5.1") {
-		t.Errorf("expected -DreleaseVersion=2.5.1 in args: %s", releaseArgs)
-	}
-	if !strings.Contains(releaseArgs, "-DdevelopmentVersion=2.5.2-SNAPSHOT") {
-		t.Errorf("expected -DdevelopmentVersion=2.5.2-SNAPSHOT in args: %s", releaseArgs)
+	args := strings.Join(call.Args, " ")
+	for _, want := range []string{
+		"clean",
+		"release:clean",
+		"release:prepare",
+		"release:perform",
+		"-Darguments=-DskipTests",
+		"-DreleaseVersion=2.5.1",
+		"-DdevelopmentVersion=2.5.2-SNAPSHOT",
+		"-e",
+	} {
+		if !strings.Contains(args, want) {
+			t.Errorf("expected %q in mvn args: %s", want, args)
+		}
 	}
 }

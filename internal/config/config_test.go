@@ -19,6 +19,9 @@ func TestLoad_parsesValidConfig(t *testing.T) {
 	if cfg.Settings.Workspace != "/tmp/test-workspace" {
 		t.Errorf("workspace: got %q, want /tmp/test-workspace", cfg.Settings.Workspace)
 	}
+	if cfg.Settings.GroupID != "org.example" {
+		t.Errorf("group_id: got %q, want org.example", cfg.Settings.GroupID)
+	}
 	if cfg.Settings.MavenCentralMaxWait != config.Duration(30*time.Minute) {
 		t.Errorf("max wait: got %v, want 30m", time.Duration(cfg.Settings.MavenCentralMaxWait))
 	}
@@ -78,6 +81,16 @@ func TestLoad_appliesDefaultTimeouts(t *testing.T) {
 	}
 	if cfg.Settings.MavenCentralPollInterval != config.Duration(30*time.Second) {
 		t.Errorf("poll interval: got %v, want 30s", time.Duration(cfg.Settings.MavenCentralPollInterval))
+	}
+}
+
+func TestLoad_appliesDefaultGroupID(t *testing.T) {
+	cfg, err := config.Load("testdata/minimal.toml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Settings.GroupID != "org.kiwiproject" {
+		t.Errorf("group_id: got %q, want org.kiwiproject", cfg.Settings.GroupID)
 	}
 }
 

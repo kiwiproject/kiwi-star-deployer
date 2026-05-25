@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/kiwiproject/kiwi-star-deployer/internal/config"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/mavencentral"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/plan"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/preflight"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/release"
@@ -43,7 +45,14 @@ func runRelease(_ *cobra.Command, _ []string) error {
 
 	logBaseDir := filepath.Join(filepath.Dir(cfg.Settings.Workspace), "logs")
 
-	return release.Execute(os.Stdout, stages, ws, r, logBaseDir)
+	opts := release.Options{
+		GroupID:      cfg.Settings.GroupID,
+		MaxWait:      time.Duration(cfg.Settings.MavenCentralMaxWait),
+		PollInterval: time.Duration(cfg.Settings.MavenCentralPollInterval),
+		Checker:      mavencentral.New(),
+	}
+
+	return release.Execute(os.Stdout, stages, ws, r, logBaseDir, opts)
 }
 
 func init() {

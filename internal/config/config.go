@@ -24,6 +24,7 @@ type Config struct {
 
 type Settings struct {
 	Workspace                string   `toml:"workspace"`
+	GroupID                  string   `toml:"group_id"`
 	MavenCentralMaxWait      Duration `toml:"maven_central_max_wait"`
 	MavenCentralPollInterval Duration `toml:"maven_central_poll_interval"`
 }
@@ -68,6 +69,9 @@ func Load(path string) (*Config, error) {
 func applyDefaults(cfg *Config) {
 	if cfg.Settings.Workspace == "" {
 		cfg.Settings.Workspace = "~/.kiwi-star-deployer/workspace"
+	}
+	if cfg.Settings.GroupID == "" {
+		cfg.Settings.GroupID = "org.kiwiproject"
 	}
 	if cfg.Settings.MavenCentralMaxWait == 0 {
 		cfg.Settings.MavenCentralMaxWait = Duration(60 * time.Minute)
