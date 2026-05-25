@@ -23,17 +23,17 @@ var releaseCmd = &cobra.Command{
 }
 
 func runRelease(_ *cobra.Command, _ []string) error {
-	r := runner.NewOsRunner()
-
-	results := preflight.RunAll(r)
-	preflight.Print(os.Stdout, results)
-	if !preflight.AllPassed(results) {
-		return fmt.Errorf("preflight failed; fix the issues above before releasing")
-	}
-
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return err
+	}
+
+	r := runner.NewOsRunner()
+
+	results := preflight.RunAll(r, cfg.Settings.ChangelogScript)
+	preflight.Print(os.Stdout, results)
+	if !preflight.AllPassed(results) {
+		return fmt.Errorf("preflight failed; fix the issues above before releasing")
 	}
 
 	ws := workspace.New(cfg.Settings.Workspace, r)
@@ -46,10 +46,11 @@ func runRelease(_ *cobra.Command, _ []string) error {
 	logBaseDir := filepath.Join(filepath.Dir(cfg.Settings.Workspace), "logs")
 
 	opts := release.Options{
-		GroupID:      cfg.Settings.GroupID,
-		MaxWait:      time.Duration(cfg.Settings.MavenCentralMaxWait),
-		PollInterval: time.Duration(cfg.Settings.MavenCentralPollInterval),
-		Checker:      mavencentral.New(),
+		GroupID:         cfg.Settings.GroupID,
+		MaxWait:         time.Duration(cfg.Settings.MavenCentralMaxWait),
+		PollInterval:    time.Duration(cfg.Settings.MavenCentralPollInterval),
+		Checker:         mavencentral.New(),
+		ChangelogScript: cfg.Settings.ChangelogScript,
 	}
 
 	return release.Execute(os.Stdout, stages, ws, r, logBaseDir, opts)

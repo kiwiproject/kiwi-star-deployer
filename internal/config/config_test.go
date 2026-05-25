@@ -22,6 +22,9 @@ func TestLoad_parsesValidConfig(t *testing.T) {
 	if cfg.Settings.GroupID != "org.example" {
 		t.Errorf("group_id: got %q, want org.example", cfg.Settings.GroupID)
 	}
+	if cfg.Settings.ChangelogScript != "gkc" {
+		t.Errorf("changelog_script: got %q, want gkc", cfg.Settings.ChangelogScript)
+	}
 	if cfg.Settings.MavenCentralMaxWait != config.Duration(30*time.Minute) {
 		t.Errorf("max wait: got %v, want 30m", time.Duration(cfg.Settings.MavenCentralMaxWait))
 	}
@@ -91,6 +94,16 @@ func TestLoad_appliesDefaultGroupID(t *testing.T) {
 	}
 	if cfg.Settings.GroupID != "org.kiwiproject" {
 		t.Errorf("group_id: got %q, want org.kiwiproject", cfg.Settings.GroupID)
+	}
+}
+
+func TestLoad_appliesDefaultChangelogScript(t *testing.T) {
+	cfg, err := config.Load("testdata/minimal.toml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Settings.ChangelogScript != ".generate-kiwi-changelog" {
+		t.Errorf("changelog_script: got %q, want .generate-kiwi-changelog", cfg.Settings.ChangelogScript)
 	}
 }
 

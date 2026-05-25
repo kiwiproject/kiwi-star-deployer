@@ -22,10 +22,11 @@ type CentralChecker interface {
 
 // Options configures the release executor.
 type Options struct {
-	GroupID      string
-	MaxWait      time.Duration
-	PollInterval time.Duration
-	Checker      CentralChecker
+	GroupID         string
+	MaxWait         time.Duration
+	PollInterval    time.Duration
+	Checker         CentralChecker
+	ChangelogScript string
 }
 
 type libraryResult struct {
@@ -108,6 +109,17 @@ func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, 
 	repoDir := ws.RepoDir(entry.Name)
 	vp := entry.VersionPlan
 
+	// Capture the previous release tag before mvn creates the new one.
+	tagResult, err := r.Run(runner.Options{
+		Command:    "git",
+		Args:       []string{"describe", "--tags", "--abbrev=0"},
+		WorkingDir: repoDir,
+	})
+	if err != nil {
+		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), err: fmt.Errorf("git describe: %w", err)}
+	}
+	previousRev := strings.TrimPrefix(strings.TrimSpace(tagResult.Stdout), "v")
+
 	if _, err := r.Run(runner.Options{
 		Command: "mvn",
 		Args: []string{
@@ -130,6 +142,25 @@ func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, 
 
 	if err := opts.Checker.Wait(out, opts.GroupID, entry.Name, vp.ReleaseVersion, opts.MaxWait, opts.PollInterval); err != nil {
 		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), err: err}
+	}
+
+	nextMilestone := strings.TrimSuffix(vp.NextDevVersion, "-SNAPSHOT")
+	if _, err := r.Run(runner.Options{
+		Command: opts.ChangelogScript,
+		Args: []string{
+			"--repository", entry.Repo,
+			"--previous-rev", previousRev,
+			"--revision", vp.ReleaseVersion,
+			"--output-type", "GITHUB",
+			"--close-milestone",
+			"--create-next-milestone", nextMilestone,
+			"--add-v-prefix-to-revisions",
+		},
+		WorkingDir: repoDir,
+		Stdout:     out,
+		Stderr:     out,
+	}); err != nil {
+		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), err: fmt.Errorf("changelog: %w", err)}
 	}
 
 	return libraryResult{name: entry.Name, logFile: logFile}

@@ -66,6 +66,9 @@ func TestBuild_singleLibrary(t *testing.T) {
 	if entry.Name != "kiwi" {
 		t.Errorf("name: got %q, want kiwi", entry.Name)
 	}
+	if entry.Repo != "kiwiproject/kiwi" {
+		t.Errorf("repo: got %q, want kiwiproject/kiwi", entry.Repo)
+	}
 	if entry.Stage != 1 {
 		t.Errorf("stage: got %d, want 1", entry.Stage)
 	}

@@ -25,6 +25,7 @@ type Config struct {
 type Settings struct {
 	Workspace                string   `toml:"workspace"`
 	GroupID                  string   `toml:"group_id"`
+	ChangelogScript          string   `toml:"changelog_script"`
 	MavenCentralMaxWait      Duration `toml:"maven_central_max_wait"`
 	MavenCentralPollInterval Duration `toml:"maven_central_poll_interval"`
 }
@@ -72,6 +73,9 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Settings.GroupID == "" {
 		cfg.Settings.GroupID = "org.kiwiproject"
+	}
+	if cfg.Settings.ChangelogScript == "" {
+		cfg.Settings.ChangelogScript = ".generate-kiwi-changelog"
 	}
 	if cfg.Settings.MavenCentralMaxWait == 0 {
 		cfg.Settings.MavenCentralMaxWait = Duration(60 * time.Minute)

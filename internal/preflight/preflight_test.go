@@ -41,7 +41,7 @@ func TestRunAll_ghAuthPass(t *testing.T) {
 	fr := &runner.FakeRunner{}
 	fr.AddResponse(&runner.Result{}, nil)
 
-	results := preflight.RunAll(fr)
+	results := preflight.RunAll(fr, ".generate-kiwi-changelog")
 
 	var authResult *preflight.Result
 	for i := range results {
@@ -62,7 +62,7 @@ func TestRunAll_ghAuthFail(t *testing.T) {
 	fr := &runner.FakeRunner{}
 	fr.AddResponse(nil, errors.New("exit status 1"))
 
-	results := preflight.RunAll(fr)
+	results := preflight.RunAll(fr, ".generate-kiwi-changelog")
 
 	var authResult *preflight.Result
 	for i := range results {

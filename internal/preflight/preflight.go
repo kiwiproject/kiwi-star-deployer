@@ -17,13 +17,13 @@ type Result struct {
 }
 
 // RunAll runs all preflight checks and returns their results in order.
-func RunAll(r runner.Runner) []Result {
+func RunAll(r runner.Runner, changelogScript string) []Result {
 	return []Result{
 		checkInPath("git"),
 		checkInPath("gh"),
 		checkGHAuth(r),
 		checkInPath("mvn"),
-		checkInPath("kiwiproject-changelog"),
+		checkInPath(changelogScript),
 	}
 }
 
