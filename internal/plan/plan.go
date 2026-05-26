@@ -16,9 +16,16 @@ import (
 // Entry holds the version plan for one library within a release stage.
 type Entry struct {
 	Name        string
-	Repo        string // GitHub repository, e.g. "kiwiproject/kiwi"
+	Repo        string   // GitHub repository, e.g. "kiwiproject/kiwi"
+	Type        string   // library type, e.g. "bom-aggregator"
+	DependsOn   []string // names of libraries this one depends on
 	Stage       int
 	VersionPlan version.Plan
+}
+
+// IsBOMAggregator reports whether this entry is a bom-aggregator library.
+func (e Entry) IsBOMAggregator() bool {
+	return e.Type == config.TypeBOMAggregator
 }
 
 // Build constructs the full release plan. It clones any repos not yet present
@@ -48,6 +55,8 @@ func Build(cfg *config.Config, ws *workspace.Workspace) ([][]Entry, error) {
 			result[i] = append(result[i], Entry{
 				Name:        name,
 				Repo:        lib.Repo,
+				Type:        lib.Type,
+				DependsOn:   lib.DependsOn,
 				Stage:       i + 1,
 				VersionPlan: vp,
 			})

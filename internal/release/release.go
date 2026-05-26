@@ -70,9 +70,125 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 		if failed {
 			return fmt.Errorf("stage %d failed; halting", i+1)
 		}
+
+		if i < len(stages)-1 {
+			if err := updateDownstreamPOMs(w, stage, stages[i+1:], ws, r, logDir, opts.GroupID); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil
+}
+
+func updateDownstreamPOMs(w io.Writer, releasedStage []plan.Entry, futureStages [][]plan.Entry, ws *workspace.Workspace, r runner.Runner, logDir string, groupID string) error {
+	released := make(map[string]plan.Entry)
+	for _, e := range releasedStage {
+		released[e.Name] = e
+	}
+
+	for _, stage := range futureStages {
+		for _, entry := range stage {
+			if entry.IsBOMAggregator() {
+				continue
+			}
+			var deps []plan.Entry
+			for _, depName := range entry.DependsOn {
+				if re, ok := released[depName]; ok {
+					deps = append(deps, re)
+				}
+			}
+			if len(deps) == 0 {
+				continue
+			}
+
+			logFile := filepath.Join(logDir, entry.Name+"-pom-update.log")
+			depSummary := make([]string, len(deps))
+			for i, d := range deps {
+				depSummary[i] = d.Name + " " + d.VersionPlan.ReleaseVersion
+			}
+			fmt.Fprintf(w, "  POM update %s: %s\n", entry.Name, strings.Join(depSummary, ", "))
+
+			if err := updatePOM(entry, deps, ws, r, logFile, groupID); err != nil {
+				fmt.Fprintf(w, "  FAILED POM update %s\n", entry.Name)
+				fmt.Fprintf(w, "  log:   %s\n", logFile)
+				return fmt.Errorf("POM update for %s: %w", entry.Name, err)
+			}
+			fmt.Fprintf(w, "  done   POM update %s  (log: %s)\n", entry.Name, logFile)
+		}
+	}
+	return nil
+}
+
+func updatePOM(entry plan.Entry, deps []plan.Entry, ws *workspace.Workspace, r runner.Runner, logFile string, groupID string) error {
+	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("opening log file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	var buf bytes.Buffer
+	out := io.MultiWriter(f, &buf)
+	repoDir := ws.RepoDir(entry.Name)
+
+	for _, dep := range deps {
+		if _, err := r.Run(runner.Options{
+			Command: "mvn",
+			Args: []string{
+				"-B",
+				"versions:use-dep-version",
+				"-Dincludes=" + groupID + ":" + dep.Name,
+				"-DdepVersion=" + dep.VersionPlan.ReleaseVersion,
+				"-DgenerateBackupPoms=false",
+			},
+			WorkingDir: repoDir,
+			Stdout:     out,
+			Stderr:     out,
+		}); err != nil {
+			return fmt.Errorf("mvn versions:use-dep-version for %s: %w", dep.Name, err)
+		}
+	}
+
+	if _, err := r.Run(runner.Options{
+		Command:    "git",
+		Args:       []string{"add", "pom.xml"},
+		WorkingDir: repoDir,
+		Stdout:     out,
+		Stderr:     out,
+	}); err != nil {
+		return fmt.Errorf("git add: %w", err)
+	}
+
+	if _, err := r.Run(runner.Options{
+		Command:    "git",
+		Args:       []string{"commit", "-m", buildPOMUpdateCommitMessage(deps)},
+		WorkingDir: repoDir,
+		Stdout:     out,
+		Stderr:     out,
+	}); err != nil {
+		return fmt.Errorf("git commit: %w", err)
+	}
+
+	if _, err := r.Run(runner.Options{
+		Command:    "git",
+		Args:       []string{"push"},
+		WorkingDir: repoDir,
+		Stdout:     out,
+		Stderr:     out,
+	}); err != nil {
+		return fmt.Errorf("git push: %w", err)
+	}
+
+	return nil
+}
+
+func buildPOMUpdateCommitMessage(deps []plan.Entry) string {
+	var sb strings.Builder
+	sb.WriteString("chore: update dependency versions\n\n")
+	for _, dep := range deps {
+		fmt.Fprintf(&sb, "- %s %s\n", dep.Name, dep.VersionPlan.ReleaseVersion)
+	}
+	return sb.String()
 }
 
 // releaseStage releases all libraries in a stage concurrently and waits for

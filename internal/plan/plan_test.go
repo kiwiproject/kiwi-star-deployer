@@ -69,6 +69,12 @@ func TestBuild_singleLibrary(t *testing.T) {
 	if entry.Repo != "kiwiproject/kiwi" {
 		t.Errorf("repo: got %q, want kiwiproject/kiwi", entry.Repo)
 	}
+	if entry.Type != "" {
+		t.Errorf("type: got %q, want empty", entry.Type)
+	}
+	if len(entry.DependsOn) != 0 {
+		t.Errorf("depends_on: got %v, want empty", entry.DependsOn)
+	}
 	if entry.Stage != 1 {
 		t.Errorf("stage: got %d, want 1", entry.Stage)
 	}
@@ -110,6 +116,41 @@ func TestBuild_respectsStageOrder(t *testing.T) {
 	}
 	if stages[2][0].Name != "kiwi" {
 		t.Errorf("stage 3: got %q, want kiwi", stages[2][0].Name)
+	}
+}
+
+func TestBuild_populatesTypeAndDependsOn(t *testing.T) {
+	dir, ws := makeWorkspace(t)
+	createRepo(t, dir, "kiwi-parent", "3.0.0-SNAPSHOT")
+	createRepo(t, dir, "kiwi-bom", "2.0.0-SNAPSHOT")
+
+	cfg := &config.Config{
+		Settings: config.Settings{Workspace: dir},
+		Libraries: map[string]config.Library{
+			"kiwi-parent": {Repo: "kiwiproject/kiwi-parent", Type: "parent-pom"},
+			"kiwi-bom":    {Repo: "kiwiproject/kiwi-bom", Type: "bom", DependsOn: []string{"kiwi-parent"}},
+		},
+	}
+
+	stages, err := plan.Build(cfg, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	parent := stages[0][0]
+	if parent.Type != "parent-pom" {
+		t.Errorf("kiwi-parent type: got %q, want parent-pom", parent.Type)
+	}
+	if len(parent.DependsOn) != 0 {
+		t.Errorf("kiwi-parent depends_on: got %v, want empty", parent.DependsOn)
+	}
+
+	bom := stages[1][0]
+	if bom.Type != "bom" {
+		t.Errorf("kiwi-bom type: got %q, want bom", bom.Type)
+	}
+	if len(bom.DependsOn) != 1 || bom.DependsOn[0] != "kiwi-parent" {
+		t.Errorf("kiwi-bom depends_on: got %v, want [kiwi-parent]", bom.DependsOn)
 	}
 }
 
