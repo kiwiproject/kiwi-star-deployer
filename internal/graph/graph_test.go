@@ -62,14 +62,14 @@ func TestStages_cycleDetected(t *testing.T) {
 	}
 }
 
-func TestStages_bomAggregatorLastAmongCoreLibs(t *testing.T) {
+func TestStages_libraryBOMLastAmongCoreLibs(t *testing.T) {
 	// kiwi-libraries-bom declares only kiwi in depends_on; synthetic edges
 	// must pull it after kiwi-parent and kiwi-bom as well.
 	libs := map[string]config.Library{
 		"kiwi-parent":        {Repo: "kiwiproject/kiwi-parent", Type: "parent-pom"},
 		"kiwi-bom":           {Repo: "kiwiproject/kiwi-bom", Type: "bom", DependsOn: []string{"kiwi-parent"}},
 		"kiwi":               {Repo: "kiwiproject/kiwi", DependsOn: []string{"kiwi-parent", "kiwi-bom"}},
-		"kiwi-libraries-bom": {Repo: "kiwiproject/kiwi-libraries-bom", Type: "bom-aggregator", DependsOn: []string{"kiwi"}},
+		"kiwi-libraries-bom": {Repo: "kiwiproject/kiwi-libraries-bom", Type: "library-bom", DependsOn: []string{"kiwi"}},
 	}
 	stages := mustStages(t, libs)
 	assertStages(t, stages, [][]string{
@@ -80,13 +80,13 @@ func TestStages_bomAggregatorLastAmongCoreLibs(t *testing.T) {
 	})
 }
 
-func TestStages_bomAggregatorBeforeDownstreamLibs(t *testing.T) {
+func TestStages_libraryBOMBeforeDownstreamLibs(t *testing.T) {
 	// elucidation depends on kiwi-libraries-bom, so it is already downstream
 	// and must NOT receive a synthetic edge (that would create a cycle).
 	libs := map[string]config.Library{
 		"kiwi-parent":        {Repo: "kiwiproject/kiwi-parent", Type: "parent-pom"},
 		"kiwi":               {Repo: "kiwiproject/kiwi", DependsOn: []string{"kiwi-parent"}},
-		"kiwi-libraries-bom": {Repo: "kiwiproject/kiwi-libraries-bom", Type: "bom-aggregator", DependsOn: []string{"kiwi"}},
+		"kiwi-libraries-bom": {Repo: "kiwiproject/kiwi-libraries-bom", Type: "library-bom", DependsOn: []string{"kiwi"}},
 		"elucidation":        {Repo: "elucidation-project/elucidation", DependsOn: []string{"kiwi-libraries-bom"}},
 	}
 	stages := mustStages(t, libs)
@@ -98,20 +98,20 @@ func TestStages_bomAggregatorBeforeDownstreamLibs(t *testing.T) {
 	})
 }
 
-func TestStages_bomAggregatorWithNoDeclaredDeps(t *testing.T) {
-	// bom-aggregator declares no depends_on at all; synthetic edges must be
-	// added to every non-aggregator library.
+func TestStages_libraryBOMWithNoDeclaredDeps(t *testing.T) {
+	// library-bom declares no depends_on at all; synthetic edges must be
+	// added to every other library.
 	libs := map[string]config.Library{
 		"a":   {Repo: "org/a"},
 		"b":   {Repo: "org/b", DependsOn: []string{"a"}},
-		"agg": {Repo: "org/agg", Type: "bom-aggregator"},
+		"agg": {Repo: "org/agg", Type: "library-bom"},
 	}
 	stages := mustStages(t, libs)
 	assertStages(t, stages, [][]string{{"a"}, {"b"}, {"agg"}})
 }
 
-func TestStages_noBomAggregator(t *testing.T) {
-	// No bom-aggregator means no synthetic edges; plain topo sort.
+func TestStages_noLibraryBOM(t *testing.T) {
+	// No library-bom means no synthetic edges; plain topo sort.
 	libs := map[string]config.Library{
 		"a": {Repo: "org/a"},
 		"b": {Repo: "org/b", DependsOn: []string{"a"}},

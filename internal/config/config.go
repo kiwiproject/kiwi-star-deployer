@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	TypeParentPOM     = "parent-pom"
-	TypeBOM           = "bom"
-	TypeBOMAggregator = "bom-aggregator"
+	TypeParentPOM  = "parent-pom"
+	TypeBOM        = "bom"
+	TypeLibraryBOM = "library-bom"
 )
 
 type Config struct {

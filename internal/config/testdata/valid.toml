@@ -21,7 +21,7 @@ depends_on = ["kiwi-parent", "kiwi-bom"]
 
 [library.kiwi-libraries-bom]
 repo = "kiwiproject/kiwi-libraries-bom"
-type = "bom-aggregator"
+type = "library-bom"
 depends_on = ["kiwi"]
 
 [release.overrides]

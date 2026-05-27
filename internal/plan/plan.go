@@ -17,15 +17,15 @@ import (
 type Entry struct {
 	Name        string
 	Repo        string   // GitHub repository, e.g. "kiwiproject/kiwi"
-	Type        string   // library type, e.g. "bom-aggregator"
+	Type        string   // library type, e.g. "library-bom"
 	DependsOn   []string // names of libraries this one depends on
 	Stage       int
 	VersionPlan version.Plan
 }
 
-// IsBOMAggregator reports whether this entry is a bom-aggregator library.
-func (e Entry) IsBOMAggregator() bool {
-	return e.Type == config.TypeBOMAggregator
+// IsLibraryBOM reports whether this entry is a library-bom.
+func (e Entry) IsLibraryBOM() bool {
+	return e.Type == config.TypeLibraryBOM
 }
 
 // Build constructs the full release plan. It clones any repos not yet present

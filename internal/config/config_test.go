@@ -139,17 +139,17 @@ depends_on = ["kiwi"]
 			wantErr: "depends on itself",
 		},
 		{
-			name: "multiple bom-aggregators",
+			name: "multiple library-boms",
 			content: `
 [library.kiwi-libraries-bom]
 repo = "kiwiproject/kiwi-libraries-bom"
-type = "bom-aggregator"
+type = "library-bom"
 
 [library.other-bom]
 repo = "kiwiproject/other-bom"
-type = "bom-aggregator"
+type = "library-bom"
 `,
-			wantErr: `at most one library may have type "bom-aggregator"`,
+			wantErr: `at most one library may have type "library-bom"`,
 		},
 		{
 			name: "invalid override version",

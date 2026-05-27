@@ -110,7 +110,7 @@ depends_on = ["kiwi-parent", "kiwi-bom", "kiwi"]
 
 [library.kiwi-libraries-bom]
 repo = "kiwiproject/kiwi-libraries-bom"
-type = "bom-aggregator"
+type = "library-bom"
 depends_on = ["kiwi"]   # logically depends on everything; released last
 ```
 
@@ -118,7 +118,7 @@ depends_on = ["kiwi"]   # logically depends on everything; released last
 
 - `depends_on` lists only **internal** kiwiproject dependencies — external dependencies
   like Dropwizard itself are managed via `kiwi-bom` and don't appear here
-- `type = "bom-aggregator"` marks `kiwi-libraries-bom` for special handling (see below)
+- `type = "library-bom"` marks `kiwi-libraries-bom`; synthetic graph edges ensure it is released last
 - `type = "parent-pom"` / `type = "bom"` may warrant special handling for `kiwi-parent`
   and `kiwi-bom` (e.g. they don't have downstream POM version updates in the same way)
 

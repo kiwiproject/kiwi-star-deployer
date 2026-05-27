@@ -9,16 +9,16 @@ import (
 var semverRe = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 
 var validTypes = map[string]bool{
-	"":               true,
-	TypeParentPOM:    true,
-	TypeBOM:          true,
-	TypeBOMAggregator: true,
+	"":             true,
+	TypeParentPOM:  true,
+	TypeBOM:        true,
+	TypeLibraryBOM: true,
 }
 
 func validate(cfg *Config) error {
 	var errs []string
 
-	aggregatorCount := 0
+	libraryBOMCount := 0
 	for name, lib := range cfg.Libraries {
 		if lib.Repo == "" {
 			errs = append(errs, fmt.Sprintf("library %q: repo is required", name))
@@ -26,8 +26,8 @@ func validate(cfg *Config) error {
 		if !validTypes[lib.Type] {
 			errs = append(errs, fmt.Sprintf("library %q: invalid type %q", name, lib.Type))
 		}
-		if lib.Type == TypeBOMAggregator {
-			aggregatorCount++
+		if lib.Type == TypeLibraryBOM {
+			libraryBOMCount++
 		}
 		for _, dep := range lib.DependsOn {
 			if dep == name {
@@ -40,8 +40,8 @@ func validate(cfg *Config) error {
 		}
 	}
 
-	if aggregatorCount > 1 {
-		errs = append(errs, fmt.Sprintf("at most one library may have type %q, found %d", TypeBOMAggregator, aggregatorCount))
+	if libraryBOMCount > 1 {
+		errs = append(errs, fmt.Sprintf("at most one library may have type %q, found %d", TypeLibraryBOM, libraryBOMCount))
 	}
 
 	for name, version := range cfg.Release.Overrides {

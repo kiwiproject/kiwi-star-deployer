@@ -89,9 +89,6 @@ func updateDownstreamPOMs(w io.Writer, releasedStage []plan.Entry, futureStages 
 
 	for _, stage := range futureStages {
 		for _, entry := range stage {
-			if entry.IsBOMAggregator() {
-				continue
-			}
 			var deps []plan.Entry
 			for _, depName := range entry.DependsOn {
 				if re, ok := released[depName]; ok {

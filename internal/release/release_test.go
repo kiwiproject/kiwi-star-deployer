@@ -269,18 +269,21 @@ func TestExecute_updatesDownstreamPOMs(t *testing.T) {
 	}
 }
 
-func TestExecute_skipsBOMAggregatorPOMUpdate(t *testing.T) {
+func TestExecute_updatesLibraryBOMPOMs(t *testing.T) {
 	dir := t.TempDir()
 	ws := workspace.New(dir, &runner.FakeRunner{})
 
 	fr := &runner.FakeRunner{}
-	addLibraryResponses(fr, "v2.9.0") // kiwi-parent release
-	// no POM update calls — bom-aggregator is skipped
+	addLibraryResponses(fr, "v2.9.0")     // kiwi-parent release
+	fr.AddResponse(&runner.Result{}, nil) // mvn versions:use-dep-version
+	fr.AddResponse(&runner.Result{}, nil) // git add
+	fr.AddResponse(&runner.Result{}, nil) // git commit
+	fr.AddResponse(&runner.Result{}, nil) // git push
 	addLibraryResponses(fr, "v1.0.0") // kiwi-libraries-bom release
 
 	stages := makeStages(
 		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi-libraries-bom", Repo: "kiwiproject/kiwi-libraries-bom", Stage: 2, Type: "bom-aggregator", DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi-libraries-bom", "2.0.0-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-libraries-bom", Repo: "kiwiproject/kiwi-libraries-bom", Stage: 2, Type: "library-bom", DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi-libraries-bom", "2.0.0-SNAPSHOT", "")},
 	)
 
 	var buf bytes.Buffer
@@ -288,8 +291,12 @@ func TestExecute_skipsBOMAggregatorPOMUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if fr.CallCount() != 6 {
-		t.Errorf("expected 6 runner calls (no POM update), got %d", fr.CallCount())
+	if fr.CallCount() != 10 {
+		t.Errorf("expected 10 runner calls (with POM update), got %d", fr.CallCount())
+	}
+	out := buf.String()
+	if !strings.Contains(out, "POM update") {
+		t.Errorf("expected POM update in output:\n%s", out)
 	}
 }
 

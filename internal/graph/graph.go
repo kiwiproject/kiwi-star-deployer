@@ -18,10 +18,10 @@ type Graph struct {
 }
 
 // New builds a dependency graph from the given library map. If a library with
-// type "bom-aggregator" is present, synthetic dependency edges are added from
-// every non-aggregator, non-downstream library to the aggregator. This ensures
-// the aggregator appears after all core libraries in the sort while still
-// allowing libraries that depend on it (e.g. elucidation) to follow naturally.
+// type "library-bom" is present, synthetic dependency edges are added from
+// every non-library-bom, non-downstream library to it. This ensures it appears
+// after all core libraries in the sort while still allowing libraries that
+// depend on it (e.g. elucidation) to follow naturally.
 func New(libs map[string]config.Library) *Graph {
 	g := &Graph{
 		successors: make(map[string][]string, len(libs)),
@@ -42,7 +42,7 @@ func New(libs map[string]config.Library) *Graph {
 		}
 	}
 
-	if agg := findAggregator(libs); agg != "" {
+	if agg := findLibraryBOM(libs); agg != "" {
 		downstream := reachableFrom(g.successors, agg)
 		aggDeps := toSet(libs[agg].DependsOn)
 
@@ -97,9 +97,9 @@ func (g *Graph) Stages() ([][]string, error) {
 	return stages, nil
 }
 
-func findAggregator(libs map[string]config.Library) string {
+func findLibraryBOM(libs map[string]config.Library) string {
 	for name, lib := range libs {
-		if lib.Type == config.TypeBOMAggregator {
+		if lib.Type == config.TypeLibraryBOM {
 			return name
 		}
 	}
