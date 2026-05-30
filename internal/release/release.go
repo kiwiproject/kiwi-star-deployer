@@ -29,6 +29,12 @@ type Options struct {
 	Checker         CentralChecker
 	ChangelogScript string
 	StateWriter     *state.Writer
+	// Completed maps library name → already-released version for --resume runs.
+	// These libraries are skipped and recorded as completed without re-releasing.
+	Completed map[string]string
+	// Skip lists additional library names to treat as already released.
+	// Versions are resolved from the latest git tag in the workspace.
+	Skip []string
 }
 
 type libraryResult struct {
@@ -50,6 +56,11 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 	}
 	fmt.Fprintf(w, "Logs: %s\n\n", logDir)
 
+	skipVersions, err := buildSkipVersions(opts, ws, r)
+	if err != nil {
+		return err
+	}
+
 	for i, stage := range stages {
 		names := make([]string, len(stage))
 		for j, e := range stage {
@@ -57,18 +68,34 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 		}
 		fmt.Fprintf(w, "Stage %d: releasing %s\n", i+1, strings.Join(names, ", "))
 
-		results := releaseStage(stage, ws, r, logDir, opts)
+		var toSkip, toRelease []plan.Entry
+		for _, e := range stage {
+			if v, ok := skipVersions[e.Name]; ok {
+				e.VersionPlan.ReleaseVersion = v
+				toSkip = append(toSkip, e)
+			} else {
+				toRelease = append(toRelease, e)
+			}
+		}
+
+		for _, e := range toSkip {
+			fmt.Fprintf(w, "  skip    %s  (version: %s)\n", e.Name, e.VersionPlan.ReleaseVersion)
+			_ = opts.StateWriter.RecordCompleted(e.Name, e.VersionPlan.ReleaseVersion)
+		}
 
 		var failed bool
-		for _, res := range results {
-			if res.err != nil {
-				fmt.Fprintf(w, "  FAILED  %s\n", res.name)
-				fmt.Fprintf(w, "  log:    %s\n", res.logFile)
-				fmt.Fprintf(w, "%s\n", res.output)
-				_ = opts.StateWriter.RecordFailed(res.name, res.failedStep, res.err.Error())
-				failed = true
-			} else {
-				fmt.Fprintf(w, "  done    %s  (log: %s)\n", res.name, res.logFile)
+		if len(toRelease) > 0 {
+			results := releaseStage(toRelease, ws, r, logDir, opts)
+			for _, res := range results {
+				if res.err != nil {
+					fmt.Fprintf(w, "  FAILED  %s\n", res.name)
+					fmt.Fprintf(w, "  log:    %s\n", res.logFile)
+					fmt.Fprintf(w, "%s\n", res.output)
+					_ = opts.StateWriter.RecordFailed(res.name, res.failedStep, res.err.Error())
+					failed = true
+				} else {
+					fmt.Fprintf(w, "  done    %s  (log: %s)\n", res.name, res.logFile)
+				}
 			}
 		}
 
@@ -77,13 +104,42 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 		}
 
 		if i < len(stages)-1 {
-			if err := updateDownstreamPOMs(w, stage, stages[i+1:], ws, r, logDir, opts.GroupID, opts.StateWriter); err != nil {
+			effectiveStage := append(toSkip, toRelease...)
+			if err := updateDownstreamPOMs(w, effectiveStage, stages[i+1:], ws, r, logDir, opts.GroupID, opts.StateWriter); err != nil {
 				return err
 			}
 		}
 	}
 
 	return nil
+}
+
+// buildSkipVersions merges opts.Completed and opts.Skip into a single map of
+// library name → released version. For Skip entries not already in Completed,
+// the version is read from the latest git tag in the workspace.
+func buildSkipVersions(opts Options, ws *workspace.Workspace, r runner.Runner) (map[string]string, error) {
+	if len(opts.Completed) == 0 && len(opts.Skip) == 0 {
+		return nil, nil
+	}
+	skip := make(map[string]string, len(opts.Completed)+len(opts.Skip))
+	for name, ver := range opts.Completed {
+		skip[name] = ver
+	}
+	for _, name := range opts.Skip {
+		if _, already := skip[name]; already {
+			continue
+		}
+		result, err := r.Run(runner.Options{
+			Command:    "git",
+			Args:       []string{"describe", "--tags", "--abbrev=0"},
+			WorkingDir: ws.RepoDir(name),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("resolving version for --skip %q: %w", name, err)
+		}
+		skip[name] = strings.TrimPrefix(strings.TrimSpace(result.Stdout), "v")
+	}
+	return skip, nil
 }
 
 func updateDownstreamPOMs(w io.Writer, releasedStage []plan.Entry, futureStages [][]plan.Entry, ws *workspace.Workspace, r runner.Runner, logDir string, groupID string, sw *state.Writer) error {

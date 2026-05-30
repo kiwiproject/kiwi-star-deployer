@@ -406,6 +406,114 @@ func TestExecute_verifyMvnArgs(t *testing.T) {
 	}
 }
 
+func TestExecute_completedLibraryIsSkipped(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &runner.FakeRunner{})
+
+	fr := &runner.FakeRunner{}
+	// kiwi-parent is in Completed — no runner calls for it
+	fr.AddResponse(&runner.Result{}, nil) // mvn versions:use-dep-version (POM update for kiwi)
+	fr.AddResponse(&runner.Result{}, nil) // git add
+	fr.AddResponse(&runner.Result{}, nil) // git commit
+	fr.AddResponse(&runner.Result{}, nil) // git push
+	addLibraryResponses(fr, "v2.5.0")    // kiwi: git describe, mvn, changelog
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	opts := defaultOpts()
+	opts.Completed = map[string]string{"kiwi-parent": "3.0.0"}
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "skip") {
+		t.Errorf("expected 'skip' in output:\n%s", out)
+	}
+	if !strings.Contains(out, "kiwi-parent") {
+		t.Errorf("expected kiwi-parent in output:\n%s", out)
+	}
+	if !strings.Contains(out, "3.0.0") {
+		t.Errorf("expected version 3.0.0 in output:\n%s", out)
+	}
+	// 4 (POM update) + 3 (kiwi release) = 7 calls; no calls for kiwi-parent
+	if fr.CallCount() != 7 {
+		t.Errorf("expected 7 runner calls, got %d", fr.CallCount())
+	}
+}
+
+func TestExecute_skipResolvesVersionFromGitTag(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &runner.FakeRunner{})
+
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: "v3.0.0\n"}, nil) // git describe for kiwi-parent (--skip)
+	// kiwi-parent is skipped — no release calls for it
+	addLibraryResponses(fr, "v2.5.0") // kiwi: git describe, mvn, changelog
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	opts := defaultOpts()
+	opts.Skip = []string{"kiwi-parent"}
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "skip") {
+		t.Errorf("expected 'skip' in output:\n%s", out)
+	}
+	if !strings.Contains(out, "3.0.0") {
+		t.Errorf("expected version 3.0.0 in output:\n%s", out)
+	}
+	// 1 (git describe for skip) + 3 (kiwi release) = 4 calls
+	if fr.CallCount() != 4 {
+		t.Errorf("expected 4 runner calls, got %d", fr.CallCount())
+	}
+}
+
+func TestExecute_skippedVersionUsedInPOMUpdate(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &runner.FakeRunner{})
+
+	fr := &runner.FakeRunner{}
+	// kiwi-parent completed as 2.9.0, but plan would compute 3.0.0 from 3.0.0-SNAPSHOT
+	fr.AddResponse(&runner.Result{}, nil) // mvn versions:use-dep-version (should use 2.9.0)
+	fr.AddResponse(&runner.Result{}, nil) // git add
+	fr.AddResponse(&runner.Result{}, nil) // git commit
+	fr.AddResponse(&runner.Result{}, nil) // git push
+	addLibraryResponses(fr, "v2.5.0")    // kiwi: git describe, mvn, changelog
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	opts := defaultOpts()
+	opts.Completed = map[string]string{"kiwi-parent": "2.9.0"}
+
+	release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), opts) //nolint:errcheck
+
+	mvnVersionsCall := fr.Calls[0]
+	versionArgs := strings.Join(mvnVersionsCall.Args, " ")
+	if !strings.Contains(versionArgs, "-DdepVersion=2.9.0") {
+		t.Errorf("expected -DdepVersion=2.9.0 in POM update args: %s", versionArgs)
+	}
+	if strings.Contains(versionArgs, "3.0.0") {
+		t.Errorf("unexpected 3.0.0 in POM update args: %s", versionArgs)
+	}
+}
+
 func TestExecute_verifyChangelogArgs(t *testing.T) {
 	dir := t.TempDir()
 	ws := workspace.New(dir, &runner.FakeRunner{})
