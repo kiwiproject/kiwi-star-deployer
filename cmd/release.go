@@ -12,6 +12,7 @@ import (
 	"github.com/kiwiproject/kiwi-star-deployer/internal/preflight"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/release"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/runner"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/state"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -45,12 +46,18 @@ func runRelease(_ *cobra.Command, _ []string) error {
 
 	logBaseDir := filepath.Join(filepath.Dir(cfg.Settings.Workspace), "logs")
 
+	sw, err := state.New(cfg.Settings.StatePath, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return fmt.Errorf("creating state file: %w", err)
+	}
+
 	opts := release.Options{
 		GroupID:         cfg.Settings.GroupID,
 		MaxWait:         time.Duration(cfg.Settings.MavenCentralMaxWait),
 		PollInterval:    time.Duration(cfg.Settings.MavenCentralPollInterval),
 		Checker:         mavencentral.New(),
 		ChangelogScript: cfg.Settings.ChangelogScript,
+		StateWriter:     sw,
 	}
 
 	return release.Execute(os.Stdout, stages, ws, r, logBaseDir, opts)

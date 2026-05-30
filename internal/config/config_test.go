@@ -87,6 +87,21 @@ func TestLoad_appliesDefaultTimeouts(t *testing.T) {
 	}
 }
 
+func TestLoad_appliesDefaultStatePath(t *testing.T) {
+	cfg, err := config.Load("testdata/minimal.toml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, ".kiwi-star-deployer/state.json")
+	if cfg.Settings.StatePath != want {
+		t.Errorf("state_path: got %q, want %q", cfg.Settings.StatePath, want)
+	}
+}
+
 func TestLoad_appliesDefaultGroupID(t *testing.T) {
 	cfg, err := config.Load("testdata/minimal.toml")
 	if err != nil {

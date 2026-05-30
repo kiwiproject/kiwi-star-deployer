@@ -24,6 +24,7 @@ type Config struct {
 
 type Settings struct {
 	Workspace                string   `toml:"workspace"`
+	StatePath                string   `toml:"state_path"`
 	GroupID                  string   `toml:"group_id"`
 	ChangelogScript          string   `toml:"changelog_script"`
 	MavenCentralMaxWait      Duration `toml:"maven_central_max_wait"`
@@ -71,6 +72,9 @@ func applyDefaults(cfg *Config) {
 	if cfg.Settings.Workspace == "" {
 		cfg.Settings.Workspace = "~/.kiwi-star-deployer/workspace"
 	}
+	if cfg.Settings.StatePath == "" {
+		cfg.Settings.StatePath = "~/.kiwi-star-deployer/state.json"
+	}
 	if cfg.Settings.GroupID == "" {
 		cfg.Settings.GroupID = "org.kiwiproject"
 	}
@@ -91,6 +95,12 @@ func expandPaths(cfg *Config) error {
 		return fmt.Errorf("expanding workspace path %q: %w", cfg.Settings.Workspace, err)
 	}
 	cfg.Settings.Workspace = expanded
+
+	expanded, err = expandHome(cfg.Settings.StatePath)
+	if err != nil {
+		return fmt.Errorf("expanding state_path %q: %w", cfg.Settings.StatePath, err)
+	}
+	cfg.Settings.StatePath = expanded
 	return nil
 }
 

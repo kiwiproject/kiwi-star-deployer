@@ -12,6 +12,7 @@ import (
 
 	"github.com/kiwiproject/kiwi-star-deployer/internal/plan"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/runner"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/state"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/workspace"
 )
 
@@ -27,13 +28,16 @@ type Options struct {
 	PollInterval    time.Duration
 	Checker         CentralChecker
 	ChangelogScript string
+	StateWriter     *state.Writer
 }
 
 type libraryResult struct {
-	name    string
-	logFile string
-	output  string // captured stdout+stderr, printed to console on failure
-	err     error
+	name       string
+	version    string
+	logFile    string
+	output     string // captured stdout+stderr, printed to console on failure
+	failedStep string
+	err        error
 }
 
 // Execute runs all release stages in order. Libraries within a stage are
@@ -61,6 +65,7 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 				fmt.Fprintf(w, "  FAILED  %s\n", res.name)
 				fmt.Fprintf(w, "  log:    %s\n", res.logFile)
 				fmt.Fprintf(w, "%s\n", res.output)
+				_ = opts.StateWriter.RecordFailed(res.name, res.failedStep, res.err.Error())
 				failed = true
 			} else {
 				fmt.Fprintf(w, "  done    %s  (log: %s)\n", res.name, res.logFile)
@@ -72,7 +77,7 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 		}
 
 		if i < len(stages)-1 {
-			if err := updateDownstreamPOMs(w, stage, stages[i+1:], ws, r, logDir, opts.GroupID); err != nil {
+			if err := updateDownstreamPOMs(w, stage, stages[i+1:], ws, r, logDir, opts.GroupID, opts.StateWriter); err != nil {
 				return err
 			}
 		}
@@ -81,7 +86,7 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 	return nil
 }
 
-func updateDownstreamPOMs(w io.Writer, releasedStage []plan.Entry, futureStages [][]plan.Entry, ws *workspace.Workspace, r runner.Runner, logDir string, groupID string) error {
+func updateDownstreamPOMs(w io.Writer, releasedStage []plan.Entry, futureStages [][]plan.Entry, ws *workspace.Workspace, r runner.Runner, logDir string, groupID string, sw *state.Writer) error {
 	released := make(map[string]plan.Entry)
 	for _, e := range releasedStage {
 		released[e.Name] = e
@@ -109,6 +114,7 @@ func updateDownstreamPOMs(w io.Writer, releasedStage []plan.Entry, futureStages 
 			if err := updatePOM(entry, deps, ws, r, logFile, groupID); err != nil {
 				fmt.Fprintf(w, "  FAILED POM update %s\n", entry.Name)
 				fmt.Fprintf(w, "  log:   %s\n", logFile)
+				_ = sw.RecordFailed(entry.Name, state.StepPOMUpdate, err.Error())
 				return fmt.Errorf("POM update for %s: %w", entry.Name, err)
 			}
 			fmt.Fprintf(w, "  done   POM update %s  (log: %s)\n", entry.Name, logFile)
@@ -199,7 +205,11 @@ func releaseStage(entries []plan.Entry, ws *workspace.Workspace, r runner.Runner
 		wg.Add(1)
 		go func(idx int, e plan.Entry) {
 			defer wg.Done()
-			results[idx] = releaseLibrary(e, ws, r, logDir, opts)
+			res := releaseLibrary(e, ws, r, logDir, opts)
+			if res.err == nil {
+				_ = opts.StateWriter.RecordCompleted(res.name, res.version)
+			}
+			results[idx] = res
 		}(i, entry)
 	}
 
@@ -229,7 +239,7 @@ func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, 
 		WorkingDir: repoDir,
 	})
 	if err != nil {
-		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), err: fmt.Errorf("git describe: %w", err)}
+		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepMavenRelease, err: fmt.Errorf("git describe: %w", err)}
 	}
 	previousRev := strings.TrimPrefix(strings.TrimSpace(tagResult.Stdout), "v")
 
@@ -250,11 +260,11 @@ func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, 
 		Stdout:     out,
 		Stderr:     out,
 	}); err != nil {
-		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), err: fmt.Errorf("mvn release: %w", err)}
+		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepMavenRelease, err: fmt.Errorf("mvn release: %w", err)}
 	}
 
 	if err := opts.Checker.Wait(out, opts.GroupID, entry.Name, vp.ReleaseVersion, opts.MaxWait, opts.PollInterval); err != nil {
-		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), err: err}
+		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepCentralVerify, err: err}
 	}
 
 	nextMilestone := strings.TrimSuffix(vp.NextDevVersion, "-SNAPSHOT")
@@ -273,10 +283,10 @@ func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, 
 		Stdout:     out,
 		Stderr:     out,
 	}); err != nil {
-		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), err: fmt.Errorf("changelog: %w", err)}
+		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepChangelog, err: fmt.Errorf("changelog: %w", err)}
 	}
 
-	return libraryResult{name: entry.Name, logFile: logFile}
+	return libraryResult{name: entry.Name, version: vp.ReleaseVersion, logFile: logFile}
 }
 
 func createLogDir(baseDir string) (string, error) {
