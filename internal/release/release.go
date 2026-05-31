@@ -61,6 +61,7 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 		return err
 	}
 
+	var totalReleased int
 	for i, stage := range stages {
 		names := make([]string, len(stage))
 		for j, e := range stage {
@@ -95,6 +96,7 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 					failed = true
 				} else {
 					fmt.Fprintf(w, "  done    %s  (log: %s)\n", res.name, res.logFile)
+					totalReleased++
 				}
 			}
 		}
@@ -111,6 +113,7 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 		}
 	}
 
+	fmt.Fprintf(w, "\nReleased %d %s.\n", totalReleased, pluralize("library", "libraries", totalReleased))
 	return nil
 }
 
@@ -343,6 +346,13 @@ func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, 
 	}
 
 	return libraryResult{name: entry.Name, version: vp.ReleaseVersion, logFile: logFile}
+}
+
+func pluralize(singular, plural string, n int) string {
+	if n == 1 {
+		return singular
+	}
+	return plural
 }
 
 func createLogDir(baseDir string) (string, error) {

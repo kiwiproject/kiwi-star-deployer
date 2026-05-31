@@ -86,6 +86,48 @@ func TestExecute_singleLibrarySuccess(t *testing.T) {
 	}
 }
 
+func TestExecute_completionMessageSingular(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &runner.FakeRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.5.0")
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	var buf bytes.Buffer
+	if err := release.Execute(&buf, stages, ws, fr, t.TempDir(), defaultOpts()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "Released 1 library.") {
+		t.Errorf("expected singular completion message, got:\n%s", buf.String())
+	}
+}
+
+func TestExecute_completionMessagePlural(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &runner.FakeRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.9.0")
+	addLibraryResponses(fr, "v2.5.0")
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	var buf bytes.Buffer
+	if err := release.Execute(&buf, stages, ws, fr, t.TempDir(), defaultOpts()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "Released 2 libraries.") {
+		t.Errorf("expected plural completion message, got:\n%s", buf.String())
+	}
+}
+
 func TestExecute_multipleStages(t *testing.T) {
 	dir := t.TempDir()
 	ws := workspace.New(dir, &runner.FakeRunner{})
