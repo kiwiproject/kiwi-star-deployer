@@ -3,6 +3,7 @@ package state
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -103,5 +104,21 @@ func (w *Writer) flush() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(w.path, data, 0o644)
+	// Write to a temp file in the same directory then rename atomically so a
+	// concurrent status read always sees a complete JSON file, never a partial one.
+	tmp, err := os.CreateTemp(filepath.Dir(w.path), "state-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return os.Rename(tmpName, w.path)
 }
