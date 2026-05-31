@@ -1,7 +1,9 @@
 package state_test
 
 import (
+	"bytes"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -156,5 +158,77 @@ func TestLoad_fileNotFound(t *testing.T) {
 	_, err := state.Load(filepath.Join(t.TempDir(), "nonexistent.json"))
 	if err == nil {
 		t.Error("expected error for missing file, got nil")
+	}
+}
+
+func TestPrint_withCompletedAndFailed(t *testing.T) {
+	s := &state.State{
+		RunID: "2025-11-15T14:30:00Z",
+		Completed: []state.CompletedEntry{
+			{Library: "kiwi-parent", Version: "3.1.0", CompletedAt: time.Date(2025, 11, 15, 14, 31, 22, 0, time.UTC)},
+			{Library: "kiwi-bom", Version: "2.4.0", CompletedAt: time.Date(2025, 11, 15, 14, 45, 10, 0, time.UTC)},
+		},
+		Failed: &state.FailedEntry{
+			Library: "kiwi",
+			Step:    state.StepMavenRelease,
+			Error:   "exit status 1",
+		},
+	}
+
+	var buf bytes.Buffer
+	state.Print(&buf, s)
+	out := buf.String()
+
+	for _, want := range []string{
+		"Run: 2025-11-15T14:30:00Z",
+		"Completed:",
+		"kiwi-parent", "3.1.0",
+		"kiwi-bom", "2.4.0",
+		"Failed:",
+		"library:  kiwi",
+		"step:     " + state.StepMavenRelease,
+		"error:    exit status 1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in output:\n%s", want, out)
+		}
+	}
+}
+
+func TestPrint_withNoCompleted(t *testing.T) {
+	s := &state.State{
+		RunID:     "2025-11-15T14:30:00Z",
+		Completed: []state.CompletedEntry{},
+	}
+
+	var buf bytes.Buffer
+	state.Print(&buf, s)
+	out := buf.String()
+
+	if !strings.Contains(out, "(none)") {
+		t.Errorf("expected '(none)' in output:\n%s", out)
+	}
+	if strings.Contains(out, "Failed:") {
+		t.Errorf("unexpected 'Failed:' section in output:\n%s", out)
+	}
+}
+
+func TestPrint_withNoFailed(t *testing.T) {
+	s := &state.State{
+		RunID: "2025-11-15T14:30:00Z",
+		Completed: []state.CompletedEntry{
+			{Library: "kiwi-parent", Version: "3.1.0", CompletedAt: time.Date(2025, 11, 15, 14, 31, 22, 0, time.UTC)},
+		},
+	}
+
+	var buf bytes.Buffer
+	state.Print(&buf, s)
+	out := buf.String()
+
+	if !strings.Contains(out, "kiwi-parent") {
+		t.Errorf("expected kiwi-parent in output:\n%s", out)
+	}
+	if strings.Contains(out, "Failed:") {
+		t.Errorf("unexpected 'Failed:' section when no failure:\n%s", out)
 	}
 }

@@ -2,9 +2,12 @@ package state
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
+	"text/tabwriter"
 	"time"
 )
 
@@ -84,6 +87,26 @@ func (w *Writer) RecordFailed(library, step, errMsg string) error {
 		Error:   errMsg,
 	}
 	return w.flush()
+}
+
+// Print writes a human-readable summary of s to w.
+func Print(w io.Writer, s *State) {
+	fmt.Fprintf(w, "Run: %s\n\nCompleted:\n", s.RunID)
+	if len(s.Completed) == 0 {
+		fmt.Fprintf(w, "  (none)\n")
+	} else {
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		for _, e := range s.Completed {
+			fmt.Fprintf(tw, "  %s\t%s\t%s\n", e.Library, e.Version, e.CompletedAt.Format(time.RFC3339))
+		}
+		_ = tw.Flush()
+	}
+	if s.Failed != nil {
+		fmt.Fprintf(w, "\nFailed:\n")
+		fmt.Fprintf(w, "  library:  %s\n", s.Failed.Library)
+		fmt.Fprintf(w, "  step:     %s\n", s.Failed.Step)
+		fmt.Fprintf(w, "  error:    %s\n", s.Failed.Error)
+	}
 }
 
 // Load reads and parses the state file at path.
