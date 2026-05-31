@@ -26,6 +26,8 @@ var releaseCmd = &cobra.Command{
 var (
 	resume   bool
 	skipLibs []string
+	dryRun   bool
+	onlyLibs []string
 )
 
 func runRelease(_ *cobra.Command, _ []string) error {
@@ -42,13 +44,20 @@ func runRelease(_ *cobra.Command, _ []string) error {
 			return fmt.Errorf("--skip: unknown library %q", name)
 		}
 	}
+	for _, name := range onlyLibs {
+		if _, ok := cfg.Libraries[name]; !ok {
+			return fmt.Errorf("--only: unknown library %q", name)
+		}
+	}
 
 	r := runner.NewOsRunner()
 
-	results := preflight.RunAll(r, cfg.Settings.ChangelogScript)
-	preflight.Print(os.Stdout, results)
-	if !preflight.AllPassed(results) {
-		return fmt.Errorf("preflight failed; fix the issues above before releasing")
+	if !dryRun {
+		results := preflight.RunAll(r, cfg.Settings.ChangelogScript)
+		preflight.Print(os.Stdout, results)
+		if !preflight.AllPassed(results) {
+			return fmt.Errorf("preflight failed; fix the issues above before releasing")
+		}
 	}
 
 	ws := workspace.New(cfg.Settings.Workspace, r)
@@ -56,6 +65,15 @@ func runRelease(_ *cobra.Command, _ []string) error {
 	stages, err := plan.Build(cfg, ws)
 	if err != nil {
 		return err
+	}
+
+	if len(onlyLibs) > 0 {
+		stages = filterStages(stages, onlyLibs)
+	}
+
+	if dryRun {
+		plan.Print(os.Stdout, stages)
+		return nil
 	}
 
 	logBaseDir := filepath.Join(filepath.Dir(cfg.Settings.Workspace), "logs")
@@ -101,8 +119,30 @@ func runRelease(_ *cobra.Command, _ []string) error {
 	return release.Execute(os.Stdout, stages, ws, r, logBaseDir, opts)
 }
 
+func filterStages(stages [][]plan.Entry, only []string) [][]plan.Entry {
+	onlySet := make(map[string]struct{}, len(only))
+	for _, name := range only {
+		onlySet[name] = struct{}{}
+	}
+	var result [][]plan.Entry
+	for _, stage := range stages {
+		var filtered []plan.Entry
+		for _, e := range stage {
+			if _, ok := onlySet[e.Name]; ok {
+				filtered = append(filtered, e)
+			}
+		}
+		if len(filtered) > 0 {
+			result = append(result, filtered)
+		}
+	}
+	return result
+}
+
 func init() {
 	rootCmd.AddCommand(releaseCmd)
 	releaseCmd.Flags().BoolVar(&resume, "resume", false, "resume from a previous failed run")
 	releaseCmd.Flags().StringArrayVar(&skipLibs, "skip", nil, "treat library as already released (requires --resume)")
+	releaseCmd.Flags().BoolVar(&dryRun, "dry-run", false, "show the release plan without executing any release steps")
+	releaseCmd.Flags().StringSliceVar(&onlyLibs, "only", nil, "release only these libraries (comma-separated)")
 }
