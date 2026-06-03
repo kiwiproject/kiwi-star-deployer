@@ -50,3 +50,113 @@ To embed a version number in the binary:
 go build -ldflags "-X github.com/kiwiproject/kiwi-star-deployer/cmd.version=1.0.0" \
   -o kiwi-star-deployer .
 ```
+
+## Configuration
+
+The tool reads a TOML config file. By default it looks for `kiwi-star-deployer.toml`
+in the current directory; use `--config <path>` to specify a different location.
+
+### Full annotated example
+
+```toml
+[settings]
+# Directory where library repositories are cloned.
+# Default: ~/.kiwi-star-deployer/workspace
+workspace = "~/.kiwi-star-deployer/workspace"
+
+# Path to the JSON file that tracks release run state (used by --resume).
+# Default: ~/.kiwi-star-deployer/state.json
+state_path = "~/.kiwi-star-deployer/state.json"
+
+# Maven groupId shared by all libraries.
+# Default: org.kiwiproject
+group_id = "org.kiwiproject"
+
+# Path or name of the changelog generation script.
+# Default: .generate-kiwi-changelog
+changelog_script = ".generate-kiwi-changelog"
+
+# How long to wait for a released artifact to appear in Maven Central.
+# Default: 1h
+maven_central_max_wait = "1h"
+
+# How often to poll Maven Central while waiting.
+# Default: 30s
+maven_central_poll_interval = "30s"
+
+# Whether to verify GitHub Actions CI passes after each downstream POM update push.
+# Set to false to skip CI verification entirely.
+# Default: true
+ci_verify = true
+
+# How long to wait for CI runs to appear and complete after a POM update push.
+# Default: 30m
+ci_max_wait = "30m"
+
+# How often to poll GitHub Actions while waiting for CI to complete.
+# Default: 30s
+ci_poll_interval = "30s"
+
+
+# Each library to be released is declared as [library.<name>].
+# The name is used as the Maven artifactId.
+
+[library.kiwi-parent]
+repo = "kiwiproject/kiwi-parent"   # GitHub repository (required)
+type = "parent-pom"                 # optional; see Library types below
+
+[library.kiwi-bom]
+repo = "kiwiproject/kiwi-bom"
+type = "bom"
+depends_on = ["kiwi-parent"]       # releases after kiwi-parent; POM updated automatically
+
+[library.kiwi-libraries-bom]
+repo = "kiwiproject/kiwi-libraries-bom"
+type = "library-bom"               # at most one library may have this type
+depends_on = ["kiwi-parent", "kiwi-bom"]
+
+[library.kiwi]
+repo = "kiwiproject/kiwi"
+depends_on = ["kiwi-parent", "kiwi-bom"]
+
+
+# Version overrides force a specific release version regardless of what is in the POM.
+# Useful when the next POM version would compute incorrectly (e.g. after a hotfix branch).
+# Values must be in X.Y.Z format.
+
+[release.overrides]
+kiwi = "3.0.0"
+```
+
+### Settings reference
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `workspace` | string | `~/.kiwi-star-deployer/workspace` | Directory for cloned repos |
+| `state_path` | string | `~/.kiwi-star-deployer/state.json` | Release run state file |
+| `group_id` | string | `org.kiwiproject` | Maven groupId |
+| `changelog_script` | string | `.generate-kiwi-changelog` | Changelog script name or path |
+| `maven_central_max_wait` | duration | `1h` | Max wait for Maven Central publication |
+| `maven_central_poll_interval` | duration | `30s` | Poll interval for Maven Central |
+| `ci_verify` | bool | `true` | Verify CI after each POM update push |
+| `ci_max_wait` | duration | `30m` | Max wait for CI runs to complete |
+| `ci_poll_interval` | duration | `30s` | Poll interval for CI runs |
+
+Duration values use Go duration syntax: `30s`, `5m`, `1h30m`.
+
+### Library fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `repo` | yes | GitHub repository in `owner/repo` format |
+| `type` | no | Library type (see below) |
+| `depends_on` | no | Names of libraries this one depends on |
+
+### Library types
+
+| Type | Description |
+|------|-------------|
+| (unset) | Regular library |
+| `parent-pom` | Maven parent POM |
+| `bom` | Bill of Materials POM |
+| `library-bom` | Library-managed BOM; at most one per config |
