@@ -21,6 +21,12 @@ func (f *fakeCentral) Wait(_ io.Writer, _, _, _ string, _, _ time.Duration) erro
 	return f.err
 }
 
+type fakeCIChecker struct{ err error }
+
+func (f *fakeCIChecker) Wait(_ io.Writer, _, _ string, _, _ time.Duration) error {
+	return f.err
+}
+
 func defaultOpts() release.Options {
 	return release.Options{
 		GroupID:         "org.kiwiproject",
@@ -553,6 +559,84 @@ func TestExecute_skippedVersionUsedInPOMUpdate(t *testing.T) {
 	}
 	if strings.Contains(versionArgs, "3.0.0") {
 		t.Errorf("unexpected 3.0.0 in POM update args: %s", versionArgs)
+	}
+}
+
+func TestExecute_ciVerificationPassesAfterPOMUpdate(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &runner.FakeRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.9.0")     // kiwi-parent: git describe, mvn, changelog
+	fr.AddResponse(&runner.Result{}, nil) // mvn versions (POM update for kiwi)
+	fr.AddResponse(&runner.Result{}, nil) // git add
+	fr.AddResponse(&runner.Result{}, nil) // git commit
+	fr.AddResponse(&runner.Result{}, nil) // git push
+	// fakeCIChecker makes no runner calls; git rev-parse HEAD is called by release.go
+	fr.AddResponse(&runner.Result{Stdout: "abc123\n"}, nil) // git rev-parse HEAD
+	addLibraryResponses(fr, "v2.5.0")                      // kiwi: git describe, mvn, changelog
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	opts := defaultOpts()
+	opts.CIChecker = &fakeCIChecker{}
+	opts.CIMaxWait = time.Minute
+	opts.CIPollInterval = time.Millisecond
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fr.CallCount() != 11 {
+		t.Errorf("expected 11 runner calls, got %d", fr.CallCount())
+	}
+	out := buf.String()
+	if !strings.Contains(out, "CI verify") {
+		t.Errorf("expected 'CI verify' in output:\n%s", out)
+	}
+	if !strings.Contains(out, "CI passed") {
+		t.Errorf("expected 'CI passed' in output:\n%s", out)
+	}
+}
+
+func TestExecute_ciVerificationFailureHalts(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &runner.FakeRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.9.0")     // kiwi-parent: git describe, mvn, changelog
+	fr.AddResponse(&runner.Result{}, nil) // mvn versions (POM update for kiwi)
+	fr.AddResponse(&runner.Result{}, nil) // git add
+	fr.AddResponse(&runner.Result{}, nil) // git commit
+	fr.AddResponse(&runner.Result{}, nil) // git push
+	fr.AddResponse(&runner.Result{Stdout: "abc123\n"}, nil) // git rev-parse HEAD
+	// kiwi release should NOT run after CI failure
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	opts := defaultOpts()
+	opts.CIChecker = &fakeCIChecker{err: errors.New("CI failed: conclusion: failure")}
+	opts.CIMaxWait = time.Minute
+	opts.CIPollInterval = time.Millisecond
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "CI verification") {
+		t.Errorf("expected 'CI verification' in error: %v", err)
+	}
+	// 3 (kiwi-parent) + 4 (POM update) + 1 (git rev-parse HEAD) = 8 calls; kiwi release never starts
+	if fr.CallCount() != 8 {
+		t.Errorf("expected 8 runner calls, got %d", fr.CallCount())
 	}
 }
 

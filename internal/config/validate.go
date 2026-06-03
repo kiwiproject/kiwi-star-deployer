@@ -53,6 +53,15 @@ func validate(cfg *Config) error {
 		}
 	}
 
+	if cfg.Settings.CIVerify != nil && *cfg.Settings.CIVerify {
+		if cfg.Settings.CIMaxWait <= 0 {
+			errs = append(errs, "ci_max_wait must be positive when ci_verify is true")
+		}
+		if cfg.Settings.CIPollInterval <= 0 {
+			errs = append(errs, "ci_poll_interval must be positive when ci_verify is true")
+		}
+	}
+
 	if len(errs) > 0 {
 		return fmt.Errorf("config validation failed:\n  %s", strings.Join(errs, "\n  "))
 	}

@@ -16,6 +16,7 @@ const (
 	StepCentralVerify = "maven-central-verify"
 	StepChangelog     = "changelog"
 	StepPOMUpdate     = "pom-update"
+	StepCIVerify      = "ci-verify"
 )
 
 type State struct {

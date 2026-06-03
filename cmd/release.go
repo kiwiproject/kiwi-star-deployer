@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/kiwiproject/kiwi-star-deployer/internal/ci"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/config"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/mavencentral"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/plan"
@@ -114,6 +115,11 @@ func runRelease(_ *cobra.Command, _ []string) error {
 		StateWriter:     sw,
 		Completed:       completedVersions,
 		Skip:            skipLibs,
+	}
+	if *cfg.Settings.CIVerify {
+		opts.CIChecker = &ci.GHChecker{Runner: r}
+		opts.CIMaxWait = time.Duration(cfg.Settings.CIMaxWait)
+		opts.CIPollInterval = time.Duration(cfg.Settings.CIPollInterval)
 	}
 
 	return release.Execute(os.Stdout, stages, ws, r, logBaseDir, opts)

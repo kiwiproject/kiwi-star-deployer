@@ -21,6 +21,11 @@ type CentralChecker interface {
 	Wait(w io.Writer, groupID, artifactID, version string, maxWait, interval time.Duration) error
 }
 
+// CIChecker verifies that GitHub Actions CI passes after a downstream POM update push.
+type CIChecker interface {
+	Wait(w io.Writer, repo, commitSHA string, maxWait, interval time.Duration) error
+}
+
 // Options configures the release executor.
 type Options struct {
 	GroupID         string
@@ -35,6 +40,11 @@ type Options struct {
 	// Skip lists additional library names to treat as already released.
 	// Versions are resolved from the latest git tag in the workspace.
 	Skip []string
+	// CIChecker verifies GitHub Actions CI passes after each downstream POM update push.
+	// If nil, CI verification is skipped.
+	CIChecker     CIChecker
+	CIMaxWait     time.Duration
+	CIPollInterval time.Duration
 }
 
 type libraryResult struct {
@@ -107,7 +117,7 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 
 		if i < len(stages)-1 {
 			effectiveStage := append(toSkip, toRelease...)
-			if err := updateDownstreamPOMs(w, effectiveStage, stages[i+1:], ws, r, logDir, opts.GroupID, opts.StateWriter); err != nil {
+			if err := updateDownstreamPOMs(w, effectiveStage, stages[i+1:], ws, r, logDir, opts); err != nil {
 				return err
 			}
 		}
@@ -145,7 +155,7 @@ func buildSkipVersions(opts Options, ws *workspace.Workspace, r runner.Runner) (
 	return skip, nil
 }
 
-func updateDownstreamPOMs(w io.Writer, releasedStage []plan.Entry, futureStages [][]plan.Entry, ws *workspace.Workspace, r runner.Runner, logDir string, groupID string, sw *state.Writer) error {
+func updateDownstreamPOMs(w io.Writer, releasedStage []plan.Entry, futureStages [][]plan.Entry, ws *workspace.Workspace, r runner.Runner, logDir string, opts Options) error {
 	released := make(map[string]plan.Entry)
 	for _, e := range releasedStage {
 		released[e.Name] = e
@@ -170,13 +180,31 @@ func updateDownstreamPOMs(w io.Writer, releasedStage []plan.Entry, futureStages 
 			}
 			fmt.Fprintf(w, "  POM update %s: %s\n", entry.Name, strings.Join(depSummary, ", "))
 
-			if err := updatePOM(entry, deps, ws, r, logFile, groupID); err != nil {
+			if err := updatePOM(entry, deps, ws, r, logFile, opts.GroupID); err != nil {
 				fmt.Fprintf(w, "  FAILED POM update %s\n", entry.Name)
 				fmt.Fprintf(w, "  log:   %s\n", logFile)
-				_ = sw.RecordFailed(entry.Name, state.StepPOMUpdate, err.Error())
+				_ = opts.StateWriter.RecordFailed(entry.Name, state.StepPOMUpdate, err.Error())
 				return fmt.Errorf("POM update for %s: %w", entry.Name, err)
 			}
 			fmt.Fprintf(w, "  done   POM update %s  (log: %s)\n", entry.Name, logFile)
+
+			if opts.CIChecker != nil {
+				shaResult, err := r.Run(runner.Options{
+					Command:    "git",
+					Args:       []string{"rev-parse", "HEAD"},
+					WorkingDir: ws.RepoDir(entry.Name),
+				})
+				if err != nil {
+					return fmt.Errorf("git rev-parse HEAD after POM update for %s: %w", entry.Name, err)
+				}
+				commitSHA := strings.TrimSpace(shaResult.Stdout)
+				fmt.Fprintf(w, "  CI verify %s...\n", entry.Name)
+				if err := opts.CIChecker.Wait(w, entry.Repo, commitSHA, opts.CIMaxWait, opts.CIPollInterval); err != nil {
+					_ = opts.StateWriter.RecordFailed(entry.Name, state.StepCIVerify, err.Error())
+					return fmt.Errorf("CI verification for %s: %w", entry.Name, err)
+				}
+				fmt.Fprintf(w, "  CI passed %s\n", entry.Name)
+			}
 		}
 	}
 	return nil

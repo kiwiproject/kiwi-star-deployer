@@ -122,6 +122,38 @@ func TestLoad_appliesDefaultChangelogScript(t *testing.T) {
 	}
 }
 
+func TestLoad_defaultsCIVerifyToTrue(t *testing.T) {
+	cfg, err := config.Load("testdata/minimal.toml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Settings.CIVerify == nil {
+		t.Fatal("CIVerify: got nil, want non-nil")
+	}
+	if !*cfg.Settings.CIVerify {
+		t.Error("CIVerify: got false, want true (default)")
+	}
+}
+
+func TestLoad_ciVerifyExplicitFalse(t *testing.T) {
+	cfg, err := config.Load(writeTempTOML(t, `
+[library.kiwi]
+repo = "kiwiproject/kiwi"
+
+[settings]
+ci_verify = false
+`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Settings.CIVerify == nil {
+		t.Fatal("CIVerify: got nil, want non-nil")
+	}
+	if *cfg.Settings.CIVerify {
+		t.Error("CIVerify: got true, want false (explicit)")
+	}
+}
+
 func TestLoad_fileNotFound(t *testing.T) {
 	_, err := config.Load("testdata/nonexistent.toml")
 	if err == nil {
@@ -204,6 +236,30 @@ repo = "kiwiproject/kiwi"
 type = "unknown-type"
 `,
 			wantErr: `invalid type "unknown-type"`,
+		},
+		{
+			name: "ci_max_wait negative when ci_verify true",
+			content: `
+[library.kiwi]
+repo = "kiwiproject/kiwi"
+
+[settings]
+ci_verify = true
+ci_max_wait = "-1s"
+`,
+			wantErr: "ci_max_wait must be positive",
+		},
+		{
+			name: "ci_poll_interval negative when ci_verify true",
+			content: `
+[library.kiwi]
+repo = "kiwiproject/kiwi"
+
+[settings]
+ci_verify = true
+ci_poll_interval = "-1s"
+`,
+			wantErr: "ci_poll_interval must be positive",
 		},
 	}
 
