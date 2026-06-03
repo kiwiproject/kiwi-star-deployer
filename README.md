@@ -110,14 +110,16 @@ repo = "kiwiproject/kiwi-bom"
 type = "bom"
 depends_on = ["kiwi-parent"]       # releases after kiwi-parent; POM updated automatically
 
-[library.kiwi-libraries-bom]
-repo = "kiwiproject/kiwi-libraries-bom"
-type = "library-bom"               # at most one library may have this type
-depends_on = ["kiwi-parent", "kiwi-bom"]
-
 [library.kiwi]
 repo = "kiwiproject/kiwi"
 depends_on = ["kiwi-parent", "kiwi-bom"]
+
+# kiwi-libraries-bom aggregates all library versions, so it depends on everything
+# and is released last.
+[library.kiwi-libraries-bom]
+repo = "kiwiproject/kiwi-libraries-bom"
+type = "library-bom"               # at most one library may have this type
+depends_on = ["kiwi-parent", "kiwi-bom", "kiwi"]
 
 
 # Version overrides force a specific release version regardless of what is in the POM.
@@ -125,7 +127,7 @@ depends_on = ["kiwi-parent", "kiwi-bom"]
 # Values must be in X.Y.Z format.
 
 [release.overrides]
-kiwi = "3.0.0"
+kiwi = "5.3.1"
 ```
 
 ### Settings reference
