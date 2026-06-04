@@ -162,3 +162,60 @@ Duration values use Go duration syntax: `30s`, `5m`, `1h30m`.
 | `parent-pom` | Maven parent POM |
 | `bom` | Bill of Materials POM |
 | `library-bom` | Library-managed BOM; at most one per config |
+
+## Changelog tool configuration
+
+`kiwi-star-deployer` invokes the [kiwiproject changelog script](https://github.com/kiwiproject/kiwiproject-changelog)
+after each library release. The script automatically picks up user preferences
+from `~/.kiwi-changelog.yml`.
+
+At minimum, set these two keys:
+
+```yaml
+useTagDateForRelease: true
+addMilestoneLink: true
+```
+
+`useTagDateForRelease: true` stamps the changelog entry with the date of the
+release tag rather than the date the changelog was generated, which gives
+accurate dates when releasing multiple libraries in sequence.
+
+`addMilestoneLink: true` links each changelog entry to its GitHub milestone,
+making it easy to navigate from a release to the full set of issues it closed.
+
+### Category configuration
+
+The changelog script groups issues by label into categories. Configure the
+mapping to match your label taxonomy. A full working example for kiwiproject
+is available in the repository as
+[sample-kiwi-changelog.yml](https://github.com/kiwiproject/kiwiproject-changelog/blob/main/sample-kiwi-changelog.yml).
+
+A minimal `~/.kiwi-changelog.yml` looks like:
+
+```yaml
+useTagDateForRelease: true
+addMilestoneLink: true
+
+categories:
+  - title: Breaking Changes
+    labels:
+      - API change
+  - title: New Features
+    labels:
+      - new feature
+  - title: Bug Fixes
+    labels:
+      - bug
+  - title: Improvements
+    labels:
+      - enhancement
+  - title: Dependency Updates
+    labels:
+      - dependencies
+    emoji: 📦
+  - title: Other Changes
+    default: true
+    labels:
+      - documentation
+      - chore
+```
