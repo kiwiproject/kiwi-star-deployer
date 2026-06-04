@@ -219,3 +219,111 @@ categories:
       - documentation
       - chore
 ```
+
+## Commands
+
+All commands accept a `--config <path>` flag (default: `kiwi-star-deployer.toml`).
+
+### release
+
+Releases all libraries in dependency order.
+
+```sh
+kiwi-star-deployer release [flags]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Print the release plan without executing any steps |
+| `--only <libs>` | Release only the named libraries (comma-separated or repeated) |
+| `--resume` | Resume a previously failed run, skipping already-completed libraries |
+| `--skip <lib>` | Treat a library as already released; requires `--resume` (repeatable) |
+
+**Examples**
+
+Preview what would be released without doing anything:
+
+```sh
+kiwi-star-deployer release --dry-run
+```
+
+Release only specific libraries (patch release):
+
+```sh
+kiwi-star-deployer release --only kiwi-parent,kiwi-bom
+```
+
+Resume after a failure, treating a manually-released library as done:
+
+```sh
+kiwi-star-deployer release --resume --skip kiwi-test
+```
+
+---
+
+### plan
+
+Prints the computed release stages, dependency ordering, and resolved versions
+without cloning repos or making any changes. Useful for verifying the
+dependency graph before a release.
+
+```sh
+kiwi-star-deployer plan
+```
+
+Example output:
+
+```
+Stage 1:  kiwi-parent  2.9.0-SNAPSHOT -> 2.9.0  (next: 2.10.0-SNAPSHOT)
+Stage 2:  kiwi-bom     1.3.0-SNAPSHOT -> 1.3.0  (next: 1.4.0-SNAPSHOT)
+          kiwi         5.3.0-SNAPSHOT -> 5.3.0  (next: 5.4.0-SNAPSHOT)
+Stage 3:  kiwi-libraries-bom  2.1.0-SNAPSHOT -> 2.1.0  (next: 2.2.0-SNAPSHOT)
+```
+
+---
+
+### preflight
+
+Verifies that all required tools are installed, on your PATH, and (for `gh`)
+authenticated. Run this before your first release to catch configuration
+problems early.
+
+```sh
+kiwi-star-deployer preflight
+```
+
+Example output:
+
+```
+[PASS]  git
+[PASS]  gh
+[PASS]  gh auth
+[PASS]  mvn
+[PASS]  .generate-kiwi-changelog
+```
+
+---
+
+### status
+
+Displays the state of the current or most recent release run: which libraries
+completed, at what version and time, and which library failed (if any).
+
+```sh
+kiwi-star-deployer status
+```
+
+Example output:
+
+```
+Run: 2024-11-15T14:30:00Z
+
+Completed:
+  kiwi-parent          2.9.0  2024-11-15T14:31:22Z
+  kiwi-bom             1.3.0  2024-11-15T14:45:10Z
+
+Failed:
+  library:  kiwi
+  step:     maven-release
+  error:    exit status 1
+```
