@@ -327,3 +327,56 @@ Failed:
   step:     maven-release
   error:    exit status 1
 ```
+
+## How stages work
+
+`kiwi-star-deployer` builds a directed acyclic graph from the `depends_on`
+declarations in your config and performs a topological sort to determine
+release order. Libraries with no dependencies on each other are grouped into
+the same stage and released in parallel; libraries that depend on the output
+of a previous stage wait until that stage completes.
+
+For example, given this dependency graph:
+
+```
+kiwi-parent
+    ├── kiwi-bom
+    └── kiwi (depends on kiwi-parent and kiwi-bom)
+            └── kiwi-libraries-bom (depends on all three)
+```
+
+The tool computes three stages:
+
+```
+Stage 1:  kiwi-parent
+Stage 2:  kiwi-bom, kiwi          (parallel — neither depends on the other)
+Stage 3:  kiwi-libraries-bom
+```
+
+After each stage completes, the tool updates the `pom.xml` of every library
+in future stages that depends on a just-released library, commits the change,
+pushes it, and (if `ci_verify = true`) waits for GitHub Actions CI to pass
+before starting the next stage.
+
+If any library in a stage fails, the entire run halts. Use `kiwi-star-deployer status`
+to see what completed, then `kiwi-star-deployer release --resume` to pick up
+where it left off.
+
+## Log files
+
+Each `release` run creates a timestamped directory under `<parent of workspace>/logs/`:
+
+```
+~/.kiwi-star-deployer/logs/
+└── 2024-11-15T14-30-45/
+    ├── kiwi-parent.log
+    ├── kiwi-bom.log
+    ├── kiwi.log
+    ├── kiwi-libraries-bom.log
+    └── kiwi-libraries-bom-pom-update.log
+```
+
+Each library gets one log file capturing all output from its `mvn release:perform`,
+Maven Central verification, and changelog steps. POM update commits get a
+separate `<library>-pom-update.log` file. Log files are written in real time,
+so you can `tail -f` them during a long release run.
