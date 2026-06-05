@@ -1,0 +1,40 @@
+version: 2
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      dev-deps:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+      prod-deps:
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
+    assignees:
+      - "sleberknight"
+      - "chrisrohr"
+    open-pull-requests-limit: 10
+    cooldown:
+      semver-patch-days: 5
+      semver-minor-days: 14
+      semver-major-days: 30
+    commit-message:
+      prefix: "chore(deps)"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions-deps:
+        patterns:
+          - "*"
+    assignees:
+      - "sleberknight"
+      - "chrisrohr"
+    commit-message:
+      prefix: "chore(deps)"
