@@ -2,6 +2,7 @@ package release
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -49,7 +50,18 @@ type Options struct {
 	ChangelogSummaries map[string]string
 	// ChangelogSummaryFiles maps library name to summary file path (--summary-file flag).
 	ChangelogSummaryFiles map[string]string
+	// Interactive controls pause-and-confirm behavior: "stage" pauses between
+	// stages, "step" also pauses between POM updates and CI within a transition.
+	// Empty string means non-interactive (default).
+	Interactive string
+	// Input is the reader used for interactive prompts. Set to os.Stdin in
+	// production; tests supply a strings.Reader with pre-programmed responses.
+	Input io.Reader
 }
+
+// errStopped is returned internally when the user declines to continue in
+// interactive mode. Execute converts it to a clean (nil-error) exit.
+var errStopped = errors.New("stopped by user")
 
 type libraryResult struct {
 	name       string
@@ -122,7 +134,17 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 		if i < len(stages)-1 {
 			effectiveStage := append(toSkip, toRelease...)
 			if err := updateDownstreamPOMs(w, effectiveStage, stages[i+1:], ws, r, logDir, opts); err != nil {
+				if errors.Is(err, errStopped) {
+					fmt.Fprintf(w, "Stopped. Run with --resume to continue later.\n")
+					return nil
+				}
 				return err
+			}
+			if opts.Interactive != "" {
+				if !promptContinue(w, opts.Input, fmt.Sprintf("Stage %d complete. Proceed with stage %d?", i+1, i+2)) {
+					fmt.Fprintf(w, "Stopped. Run with --resume to continue later.\n")
+					return nil
+				}
 			}
 		}
 	}
@@ -193,6 +215,12 @@ func updateDownstreamPOMs(w io.Writer, releasedStage []plan.Entry, futureStages 
 			fmt.Fprintf(w, "  done   POM update %s  (log: %s)\n", entry.Name, logFile)
 
 			if opts.CIChecker != nil {
+				if opts.Interactive == "step" {
+					if !promptContinue(w, opts.Input, fmt.Sprintf("POM updated for %s. Proceed with CI verification?", entry.Name)) {
+						fmt.Fprintf(w, "Stopped. Run with --resume to continue later.\n")
+						return errStopped
+					}
+				}
 				shaResult, err := r.Run(runner.Options{
 					Command:    "git",
 					Args:       []string{"rev-parse", "HEAD"},
@@ -208,6 +236,12 @@ func updateDownstreamPOMs(w io.Writer, releasedStage []plan.Entry, futureStages 
 					return fmt.Errorf("CI verification for %s: %w", entry.Name, err)
 				}
 				fmt.Fprintf(w, "  CI passed %s\n", entry.Name)
+				if opts.Interactive == "step" {
+					if !promptContinue(w, opts.Input, fmt.Sprintf("CI passed for %s. Proceed?", entry.Name)) {
+						fmt.Fprintf(w, "Stopped. Run with --resume to continue later.\n")
+						return errStopped
+					}
+				}
 			}
 		}
 	}
@@ -384,6 +418,14 @@ func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, 
 	}
 
 	return libraryResult{name: entry.Name, version: vp.ReleaseVersion, logFile: logFile}
+}
+
+func promptContinue(w io.Writer, r io.Reader, msg string) bool {
+	fmt.Fprintf(w, "\n%s [Y/n]: ", msg)
+	var line string
+	fmt.Fscanln(r, &line)
+	line = strings.TrimSpace(strings.ToLower(line))
+	return line == "" || line == "y"
 }
 
 func pluralize(singular, plural string, n int) string {

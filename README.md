@@ -240,6 +240,7 @@ kiwi-star-deployer release [flags]
 | `--skip <lib>` | Treat a library as already released; requires `--resume` (repeatable) |
 | `--summary <libname=text>` | Prepend inline summary text to the changelog for a library (repeatable) |
 | `--summary-file <libname=/path>` | Prepend the contents of a file as a summary to the changelog for a library (repeatable) |
+| `--interactive` | Pause for confirmation between stages; use `--interactive=step` to also pause before and after CI verification |
 
 **Examples**
 
@@ -259,6 +260,18 @@ Resume after a failure, treating a manually-released library as done:
 
 ```sh
 kiwi-star-deployer release --resume --skip kiwi-test
+```
+
+Step through a release interactively, confirming each stage:
+
+```sh
+kiwi-star-deployer release --interactive
+```
+
+Step through with finer control, pausing before and after CI verification too:
+
+```sh
+kiwi-star-deployer release --interactive=step
 ```
 
 Major release with per-library changelog summaries:

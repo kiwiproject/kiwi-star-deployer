@@ -32,6 +32,7 @@ var (
 	onlyLibs         []string
 	summaryFlags     []string
 	summaryFileFlags []string
+	interactive      string
 )
 
 func runRelease(_ *cobra.Command, _ []string) error {
@@ -66,6 +67,10 @@ func runRelease(_ *cobra.Command, _ []string) error {
 		if _, ok := summaryFiles[name]; ok {
 			return fmt.Errorf("library %q: --summary and --summary-file are mutually exclusive", name)
 		}
+	}
+
+	if interactive != "" && interactive != "stage" && interactive != "step" {
+		return fmt.Errorf("--interactive: invalid value %q (use \"stage\" or \"step\")", interactive)
 	}
 
 	r := runner.NewOsRunner()
@@ -134,6 +139,8 @@ func runRelease(_ *cobra.Command, _ []string) error {
 		Skip:                  skipLibs,
 		ChangelogSummaries:    summaries,
 		ChangelogSummaryFiles: summaryFiles,
+		Interactive:           interactive,
+		Input:                 os.Stdin,
 	}
 	if *cfg.Settings.CIVerify {
 		opts.CIChecker = &ci.GHChecker{Runner: r}
@@ -172,6 +179,8 @@ func init() {
 	releaseCmd.Flags().StringSliceVar(&onlyLibs, "only", nil, "release only these libraries (comma-separated)")
 	releaseCmd.Flags().StringArrayVar(&summaryFlags, "summary", nil, "prepend summary text to changelog for a library (libname=text, repeatable)")
 	releaseCmd.Flags().StringArrayVar(&summaryFileFlags, "summary-file", nil, "prepend summary file to changelog for a library (libname=/path, repeatable)")
+	releaseCmd.Flags().StringVar(&interactive, "interactive", "", "pause for confirmation between stages (default) or sub-steps (--interactive=step)")
+	releaseCmd.Flag("interactive").NoOptDefVal = "stage"
 }
 
 func parseSummaryFlags(flags []string, libs map[string]config.Library) (map[string]string, error) {

@@ -741,3 +741,146 @@ func TestExecute_verifyChangelogArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestExecute_interactiveStageModeContinues(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &runner.FakeRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.9.0") // kiwi-parent
+	addLibraryResponses(fr, "v2.5.0") // kiwi (stage 2)
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	opts := defaultOpts()
+	opts.Interactive = "stage"
+	opts.Input = strings.NewReader("y\n") // continue after stage 1
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Stage 1 complete.") {
+		t.Errorf("expected stage prompt in output:\n%s", out)
+	}
+	// Both stages ran: 3 calls per stage = 6 total
+	if fr.CallCount() != 6 {
+		t.Errorf("expected 6 runner calls, got %d", fr.CallCount())
+	}
+}
+
+func TestExecute_interactiveStageModeStops(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &runner.FakeRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.9.0") // kiwi-parent (stage 1)
+	// kiwi (stage 2) should never run
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	opts := defaultOpts()
+	opts.Interactive = "stage"
+	opts.Input = strings.NewReader("n\n") // stop after stage 1
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err != nil {
+		t.Fatalf("expected nil (clean stop), got: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Stopped.") {
+		t.Errorf("expected stopped message in output:\n%s", out)
+	}
+	// Only stage 1 ran: 3 calls
+	if fr.CallCount() != 3 {
+		t.Errorf("expected 3 runner calls (stage 2 should not run), got %d", fr.CallCount())
+	}
+}
+
+func TestExecute_interactiveStepModePromptsBeforeAndAfterCI(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &runner.FakeRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.9.0")     // kiwi-parent release
+	fr.AddResponse(&runner.Result{}, nil) // mvn versions (POM update for kiwi)
+	fr.AddResponse(&runner.Result{}, nil) // git add
+	fr.AddResponse(&runner.Result{}, nil) // git commit
+	fr.AddResponse(&runner.Result{}, nil) // git push
+	fr.AddResponse(&runner.Result{Stdout: "abc123\n"}, nil) // git rev-parse HEAD
+	addLibraryResponses(fr, "v2.5.0")                      // kiwi release
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	opts := defaultOpts()
+	opts.Interactive = "step"
+	opts.CIChecker = &fakeCIChecker{}
+	opts.CIMaxWait = time.Minute
+	opts.CIPollInterval = time.Millisecond
+	// Responses: "proceed with CI?" → y, "CI passed, proceed?" → y, stage prompt → y
+	opts.Input = strings.NewReader("y\ny\ny\n")
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Proceed with CI verification?") {
+		t.Errorf("expected CI verification prompt in output:\n%s", out)
+	}
+	if !strings.Contains(out, "CI passed for kiwi. Proceed?") {
+		t.Errorf("expected post-CI prompt in output:\n%s", out)
+	}
+}
+
+func TestExecute_interactiveStepModeStopsBeforeCI(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &runner.FakeRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.9.0")     // kiwi-parent release
+	fr.AddResponse(&runner.Result{}, nil) // mvn versions
+	fr.AddResponse(&runner.Result{}, nil) // git add
+	fr.AddResponse(&runner.Result{}, nil) // git commit
+	fr.AddResponse(&runner.Result{}, nil) // git push
+	// git rev-parse and kiwi release should NOT run
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	opts := defaultOpts()
+	opts.Interactive = "step"
+	opts.CIChecker = &fakeCIChecker{}
+	opts.CIMaxWait = time.Minute
+	opts.CIPollInterval = time.Millisecond
+	opts.Input = strings.NewReader("n\n") // stop at "proceed with CI?"
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err != nil {
+		t.Fatalf("expected nil (clean stop), got: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Stopped.") {
+		t.Errorf("expected stopped message in output:\n%s", out)
+	}
+	// 3 (kiwi-parent) + 4 (POM update) = 7; git rev-parse and kiwi release never run
+	if fr.CallCount() != 7 {
+		t.Errorf("expected 7 runner calls, got %d", fr.CallCount())
+	}
+}
