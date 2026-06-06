@@ -640,6 +640,75 @@ func TestExecute_ciVerificationFailureHalts(t *testing.T) {
 	}
 }
 
+func TestExecute_changelogSummaryPassedToScript(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &runner.FakeRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.5.0")
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	opts := defaultOpts()
+	opts.ChangelogSummaries = map[string]string{"kiwi": "This is a major release with breaking API changes."}
+
+	release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), opts) //nolint:errcheck
+
+	changelogCall := fr.Calls[2] // git describe, mvn, changelog
+	args := strings.Join(changelogCall.Args, " ")
+	if !strings.Contains(args, "--summary This is a major release with breaking API changes.") {
+		t.Errorf("expected --summary in changelog args: %s", args)
+	}
+}
+
+func TestExecute_changelogSummaryFilePassedToScript(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &runner.FakeRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.5.0")
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	opts := defaultOpts()
+	opts.ChangelogSummaryFiles = map[string]string{"kiwi": "/tmp/kiwi-summary.txt"}
+
+	release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), opts) //nolint:errcheck
+
+	changelogCall := fr.Calls[2]
+	args := strings.Join(changelogCall.Args, " ")
+	if !strings.Contains(args, "--summary-file /tmp/kiwi-summary.txt") {
+		t.Errorf("expected --summary-file in changelog args: %s", args)
+	}
+}
+
+func TestExecute_changelogSummaryNotPassedForOtherLibrary(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &runner.FakeRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.5.0")
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	opts := defaultOpts()
+	opts.ChangelogSummaries = map[string]string{"kiwi-test": "summary for a different library"}
+
+	release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), opts) //nolint:errcheck
+
+	changelogCall := fr.Calls[2]
+	args := strings.Join(changelogCall.Args, " ")
+	if strings.Contains(args, "--summary") {
+		t.Errorf("expected no --summary in changelog args for unmatched library: %s", args)
+	}
+}
+
 func TestExecute_verifyChangelogArgs(t *testing.T) {
 	dir := t.TempDir()
 	ws := workspace.New(dir, &runner.FakeRunner{})

@@ -238,6 +238,8 @@ kiwi-star-deployer release [flags]
 | `--only <libs>` | Release only the named libraries (comma-separated or repeated) |
 | `--resume` | Resume a previously failed run, skipping already-completed libraries |
 | `--skip <lib>` | Treat a library as already released; requires `--resume` (repeatable) |
+| `--summary <libname=text>` | Prepend inline summary text to the changelog for a library (repeatable) |
+| `--summary-file <libname=/path>` | Prepend the contents of a file as a summary to the changelog for a library (repeatable) |
 
 **Examples**
 
@@ -257,6 +259,22 @@ Resume after a failure, treating a manually-released library as done:
 
 ```sh
 kiwi-star-deployer release --resume --skip kiwi-test
+```
+
+Major release with per-library changelog summaries:
+
+```sh
+kiwi-star-deployer release \
+  --summary kiwi="This release removes deprecated APIs from 4.x. See migration guide for details." \
+  --summary kiwi-bom="Tracks kiwi 5.0.0."
+```
+
+Or using summary files:
+
+```sh
+kiwi-star-deployer release \
+  --summary-file kiwi=/path/to/kiwi-summary.txt \
+  --summary-file kiwi-bom=/path/to/kiwi-bom-summary.txt
 ```
 
 ---

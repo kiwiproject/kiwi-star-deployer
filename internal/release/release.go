@@ -42,9 +42,13 @@ type Options struct {
 	Skip []string
 	// CIChecker verifies GitHub Actions CI passes after each downstream POM update push.
 	// If nil, CI verification is skipped.
-	CIChecker     CIChecker
-	CIMaxWait     time.Duration
+	CIChecker      CIChecker
+	CIMaxWait      time.Duration
 	CIPollInterval time.Duration
+	// ChangelogSummaries maps library name to inline summary text (--summary flag).
+	ChangelogSummaries map[string]string
+	// ChangelogSummaryFiles maps library name to summary file path (--summary-file flag).
+	ChangelogSummaryFiles map[string]string
 }
 
 type libraryResult struct {
@@ -355,17 +359,23 @@ func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, 
 	}
 
 	nextMilestone := strings.TrimSuffix(vp.NextDevVersion, "-SNAPSHOT")
+	changelogArgs := []string{
+		"--repository", entry.Repo,
+		"--previous-rev", previousRev,
+		"--revision", vp.ReleaseVersion,
+		"--output-type", "GITHUB",
+		"--close-milestone",
+		"--create-next-milestone", nextMilestone,
+		"--add-v-prefix-to-revisions",
+	}
+	if text, ok := opts.ChangelogSummaries[entry.Name]; ok {
+		changelogArgs = append(changelogArgs, "--summary", text)
+	} else if path, ok := opts.ChangelogSummaryFiles[entry.Name]; ok {
+		changelogArgs = append(changelogArgs, "--summary-file", path)
+	}
 	if _, err := r.Run(runner.Options{
-		Command: opts.ChangelogScript,
-		Args: []string{
-			"--repository", entry.Repo,
-			"--previous-rev", previousRev,
-			"--revision", vp.ReleaseVersion,
-			"--output-type", "GITHUB",
-			"--close-milestone",
-			"--create-next-milestone", nextMilestone,
-			"--add-v-prefix-to-revisions",
-		},
+		Command:    opts.ChangelogScript,
+		Args:       changelogArgs,
 		WorkingDir: repoDir,
 		Stdout:     out,
 		Stderr:     out,

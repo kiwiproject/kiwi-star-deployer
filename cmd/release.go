@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/kiwiproject/kiwi-star-deployer/internal/ci"
@@ -25,10 +26,12 @@ var releaseCmd = &cobra.Command{
 }
 
 var (
-	resume   bool
-	skipLibs []string
-	dryRun   bool
-	onlyLibs []string
+	resume           bool
+	skipLibs         []string
+	dryRun           bool
+	onlyLibs         []string
+	summaryFlags     []string
+	summaryFileFlags []string
 )
 
 func runRelease(_ *cobra.Command, _ []string) error {
@@ -48,6 +51,20 @@ func runRelease(_ *cobra.Command, _ []string) error {
 	for _, name := range onlyLibs {
 		if _, ok := cfg.Libraries[name]; !ok {
 			return fmt.Errorf("--only: unknown library %q", name)
+		}
+	}
+
+	summaries, err := parseSummaryFlags(summaryFlags, cfg.Libraries)
+	if err != nil {
+		return err
+	}
+	summaryFiles, err := parseSummaryFileFlags(summaryFileFlags, cfg.Libraries)
+	if err != nil {
+		return err
+	}
+	for name := range summaries {
+		if _, ok := summaryFiles[name]; ok {
+			return fmt.Errorf("library %q: --summary and --summary-file are mutually exclusive", name)
 		}
 	}
 
@@ -107,14 +124,16 @@ func runRelease(_ *cobra.Command, _ []string) error {
 	}
 
 	opts := release.Options{
-		GroupID:         cfg.Settings.GroupID,
-		MaxWait:         time.Duration(cfg.Settings.MavenCentralMaxWait),
-		PollInterval:    time.Duration(cfg.Settings.MavenCentralPollInterval),
-		Checker:         mavencentral.New(),
-		ChangelogScript: cfg.Settings.ChangelogScript,
-		StateWriter:     sw,
-		Completed:       completedVersions,
-		Skip:            skipLibs,
+		GroupID:               cfg.Settings.GroupID,
+		MaxWait:               time.Duration(cfg.Settings.MavenCentralMaxWait),
+		PollInterval:          time.Duration(cfg.Settings.MavenCentralPollInterval),
+		Checker:               mavencentral.New(),
+		ChangelogScript:       cfg.Settings.ChangelogScript,
+		StateWriter:           sw,
+		Completed:             completedVersions,
+		Skip:                  skipLibs,
+		ChangelogSummaries:    summaries,
+		ChangelogSummaryFiles: summaryFiles,
 	}
 	if *cfg.Settings.CIVerify {
 		opts.CIChecker = &ci.GHChecker{Runner: r}
@@ -151,4 +170,65 @@ func init() {
 	releaseCmd.Flags().StringArrayVar(&skipLibs, "skip", nil, "treat library as already released (requires --resume)")
 	releaseCmd.Flags().BoolVar(&dryRun, "dry-run", false, "show the release plan without executing any release steps")
 	releaseCmd.Flags().StringSliceVar(&onlyLibs, "only", nil, "release only these libraries (comma-separated)")
+	releaseCmd.Flags().StringArrayVar(&summaryFlags, "summary", nil, "prepend summary text to changelog for a library (libname=text, repeatable)")
+	releaseCmd.Flags().StringArrayVar(&summaryFileFlags, "summary-file", nil, "prepend summary file to changelog for a library (libname=/path, repeatable)")
+}
+
+func parseSummaryFlags(flags []string, libs map[string]config.Library) (map[string]string, error) {
+	if len(flags) == 0 {
+		return nil, nil
+	}
+	result := make(map[string]string, len(flags))
+	for _, f := range flags {
+		idx := strings.IndexByte(f, '=')
+		if idx < 0 {
+			return nil, fmt.Errorf("--summary: expected libname=text, got %q", f)
+		}
+		name, text := f[:idx], f[idx+1:]
+		if name == "" {
+			return nil, fmt.Errorf("--summary: missing library name in %q", f)
+		}
+		if _, ok := libs[name]; !ok {
+			return nil, fmt.Errorf("--summary: unknown library %q", name)
+		}
+		if text == "" {
+			return nil, fmt.Errorf("--summary: empty summary text for library %q", name)
+		}
+		if _, exists := result[name]; exists {
+			return nil, fmt.Errorf("--summary: library %q specified more than once", name)
+		}
+		result[name] = text
+	}
+	return result, nil
+}
+
+func parseSummaryFileFlags(flags []string, libs map[string]config.Library) (map[string]string, error) {
+	if len(flags) == 0 {
+		return nil, nil
+	}
+	result := make(map[string]string, len(flags))
+	for _, f := range flags {
+		idx := strings.IndexByte(f, '=')
+		if idx < 0 {
+			return nil, fmt.Errorf("--summary-file: expected libname=/path, got %q", f)
+		}
+		name, path := f[:idx], f[idx+1:]
+		if name == "" {
+			return nil, fmt.Errorf("--summary-file: missing library name in %q", f)
+		}
+		if _, ok := libs[name]; !ok {
+			return nil, fmt.Errorf("--summary-file: unknown library %q", name)
+		}
+		if path == "" {
+			return nil, fmt.Errorf("--summary-file: empty path for library %q", name)
+		}
+		if _, exists := result[name]; exists {
+			return nil, fmt.Errorf("--summary-file: library %q specified more than once", name)
+		}
+		if _, err := os.Stat(path); err != nil {
+			return nil, fmt.Errorf("--summary-file: file for library %q: %w", name, err)
+		}
+		result[name] = path
+	}
+	return result, nil
 }
