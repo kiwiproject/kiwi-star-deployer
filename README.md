@@ -30,25 +30,30 @@ Run `kiwi-star-deployer preflight` at any time to verify all prerequisites.
 
 ## Installation
 
-Clone the repository and build the binary:
+Clone the repository and install:
 
 ```sh
 git clone https://github.com/kiwiproject/kiwi-star-deployer
 cd kiwi-star-deployer
-go build -o kiwi-star-deployer .
+make install
 ```
 
-Copy the binary to a directory on your PATH, for example:
+This builds the binary with the version embedded from the current git tag and
+copies it to `$(go env GOPATH)/bin` (typically `~/go/bin`). To install
+elsewhere:
 
 ```sh
-cp kiwi-star-deployer /usr/local/bin/
+make install INSTALL_DIR=/usr/local/bin
 ```
 
-To embed a version number in the binary:
+Other useful targets:
 
 ```sh
-go build -ldflags "-X github.com/kiwiproject/kiwi-star-deployer/cmd.version=1.0.0" \
-  -o kiwi-star-deployer .
+make test     # run tests
+make vet      # run go vet
+make lint     # run golangci-lint
+make check    # vet + test + lint (matches CI)
+make help     # list all targets
 ```
 
 ## Configuration
