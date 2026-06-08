@@ -421,9 +421,15 @@ func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, 
 }
 
 func promptContinue(w io.Writer, r io.Reader, msg string) bool {
+	if r == nil {
+		return false
+	}
 	fmt.Fprintf(w, "\n%s [Y/n]: ", msg)
 	var line string
-	fmt.Fscanln(r, &line)
+	_, err := fmt.Fscanln(r, &line)
+	if errors.Is(err, io.EOF) {
+		return false
+	}
 	line = strings.TrimSpace(strings.ToLower(line))
 	return line == "" || line == "y"
 }

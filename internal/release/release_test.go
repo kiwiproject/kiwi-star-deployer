@@ -846,6 +846,46 @@ func TestExecute_interactiveStepModePromptsBeforeAndAfterCI(t *testing.T) {
 	}
 }
 
+func TestExecute_interactiveStepModeStopsAfterCI(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &runner.FakeRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.9.0")     // kiwi-parent release
+	fr.AddResponse(&runner.Result{}, nil) // mvn versions
+	fr.AddResponse(&runner.Result{}, nil) // git add
+	fr.AddResponse(&runner.Result{}, nil) // git commit
+	fr.AddResponse(&runner.Result{}, nil) // git push
+	fr.AddResponse(&runner.Result{Stdout: "abc123\n"}, nil) // git rev-parse HEAD
+	// kiwi release should NOT run
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	opts := defaultOpts()
+	opts.Interactive = "step"
+	opts.CIChecker = &fakeCIChecker{}
+	opts.CIMaxWait = time.Minute
+	opts.CIPollInterval = time.Millisecond
+	opts.Input = strings.NewReader("y\nn\n") // proceed with CI, then stop after CI passes
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err != nil {
+		t.Fatalf("expected nil (clean stop), got: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Stopped.") {
+		t.Errorf("expected stopped message in output:\n%s", out)
+	}
+	// 3 (kiwi-parent) + 4 (POM update) + 1 (git rev-parse) = 8; kiwi release never runs
+	if fr.CallCount() != 8 {
+		t.Errorf("expected 8 runner calls, got %d", fr.CallCount())
+	}
+}
+
 func TestExecute_interactiveStepModeStopsBeforeCI(t *testing.T) {
 	dir := t.TempDir()
 	ws := workspace.New(dir, &runner.FakeRunner{})
