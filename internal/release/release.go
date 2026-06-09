@@ -282,6 +282,18 @@ func updatePOM(entry plan.Entry, deps []plan.Entry, ws *workspace.Workspace, r r
 		}
 	}
 
+	statusResult, err := r.Run(runner.Options{
+		Command:    "git",
+		Args:       []string{"status", "--porcelain"},
+		WorkingDir: repoDir,
+	})
+	if err != nil {
+		return fmt.Errorf("git status: %w", err)
+	}
+	if strings.TrimSpace(statusResult.Stdout) == "" {
+		return nil // POM already up to date; nothing to commit
+	}
+
 	if _, err := r.Run(runner.Options{
 		Command:    "git",
 		Args:       []string{"add", "pom.xml"},

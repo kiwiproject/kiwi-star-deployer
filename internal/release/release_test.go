@@ -78,6 +78,16 @@ func addLibraryResponses(fr *runner.FakeRunner, previousTag string) {
 	fr.AddResponse(&runner.Result{}, nil)                   // changelog
 }
 
+// addPOMUpdateResponses adds the five runner responses for one successful POM update:
+// mvn versions:use-dep-version, git status --porcelain (reports changes), git add, git commit, git push.
+func addPOMUpdateResponses(fr *runner.FakeRunner) {
+	fr.AddResponse(&runner.Result{}, nil)                        // mvn versions:use-dep-version
+	fr.AddResponse(&runner.Result{Stdout: " M pom.xml\n"}, nil) // git status --porcelain
+	fr.AddResponse(&runner.Result{}, nil)                        // git add
+	fr.AddResponse(&runner.Result{}, nil)                        // git commit
+	fr.AddResponse(&runner.Result{}, nil)                        // git push
+}
+
 func TestExecute_singleLibrarySuccess(t *testing.T) {
 	dir := t.TempDir()
 	ws := workspace.New(dir, &prepareSuccessRunner{})
@@ -306,10 +316,7 @@ func TestExecute_updatesDownstreamPOMs(t *testing.T) {
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.9.0") // kiwi-parent release (git describe, mvn, changelog)
-	fr.AddResponse(&runner.Result{}, nil) // mvn versions:use-dep-version (kiwi POM update)
-	fr.AddResponse(&runner.Result{}, nil) // git add
-	fr.AddResponse(&runner.Result{}, nil) // git commit
-	fr.AddResponse(&runner.Result{}, nil) // git push
+	addPOMUpdateResponses(fr)          // kiwi POM update
 	addLibraryResponses(fr, "v2.5.0") // kiwi release
 
 	stages := makeStages(
@@ -322,8 +329,9 @@ func TestExecute_updatesDownstreamPOMs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if fr.CallCount() != 10 {
-		t.Errorf("expected 10 runner calls, got %d", fr.CallCount())
+	// 3 (kiwi-parent) + 5 (POM update) + 3 (kiwi) = 11
+	if fr.CallCount() != 11 {
+		t.Errorf("expected 11 runner calls, got %d", fr.CallCount())
 	}
 	out := buf.String()
 	if !strings.Contains(out, "POM update") {
@@ -336,12 +344,9 @@ func TestExecute_updatesLibraryBOMPOMs(t *testing.T) {
 	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
-	addLibraryResponses(fr, "v2.9.0")     // kiwi-parent release
-	fr.AddResponse(&runner.Result{}, nil) // mvn versions:use-dep-version
-	fr.AddResponse(&runner.Result{}, nil) // git add
-	fr.AddResponse(&runner.Result{}, nil) // git commit
-	fr.AddResponse(&runner.Result{}, nil) // git push
-	addLibraryResponses(fr, "v1.0.0") // kiwi-libraries-bom release
+	addLibraryResponses(fr, "v2.9.0")  // kiwi-parent release
+	addPOMUpdateResponses(fr)           // kiwi-libraries-bom POM update
+	addLibraryResponses(fr, "v1.0.0")  // kiwi-libraries-bom release
 
 	stages := makeStages(
 		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
@@ -353,8 +358,9 @@ func TestExecute_updatesLibraryBOMPOMs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if fr.CallCount() != 10 {
-		t.Errorf("expected 10 runner calls (with POM update), got %d", fr.CallCount())
+	// 3 (kiwi-parent) + 5 (POM update) + 3 (kiwi-libraries-bom) = 11
+	if fr.CallCount() != 11 {
+		t.Errorf("expected 11 runner calls (with POM update), got %d", fr.CallCount())
 	}
 	out := buf.String()
 	if !strings.Contains(out, "POM update") {
@@ -391,10 +397,7 @@ func TestExecute_verifyPOMUpdateArgs(t *testing.T) {
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.9.0") // kiwi-parent release
-	fr.AddResponse(&runner.Result{}, nil) // mvn versions
-	fr.AddResponse(&runner.Result{}, nil) // git add
-	fr.AddResponse(&runner.Result{}, nil) // git commit
-	fr.AddResponse(&runner.Result{}, nil) // git push
+	addPOMUpdateResponses(fr)          // kiwi POM update
 	addLibraryResponses(fr, "v2.5.0") // kiwi release
 
 	stages := makeStages(
@@ -404,7 +407,8 @@ func TestExecute_verifyPOMUpdateArgs(t *testing.T) {
 
 	release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), defaultOpts()) //nolint:errcheck
 
-	// Calls: [0]=git describe, [1]=mvn release, [2]=changelog, [3]=mvn versions, [4]=git add, [5]=git commit, [6]=git push, ...
+	// Calls: [0]=git describe, [1]=mvn release, [2]=changelog, [3]=mvn versions,
+	//        [4]=git status, [5]=git add, [6]=git commit, [7]=git push, ...
 	mvnVersionsCall := fr.Calls[3]
 	if mvnVersionsCall.Command != "mvn" {
 		t.Errorf("expected mvn, got %s", mvnVersionsCall.Command)
@@ -421,7 +425,7 @@ func TestExecute_verifyPOMUpdateArgs(t *testing.T) {
 		}
 	}
 
-	commitCall := fr.Calls[5]
+	commitCall := fr.Calls[6]
 	if commitCall.Command != "git" {
 		t.Errorf("expected git, got %s", commitCall.Command)
 	}
@@ -474,11 +478,8 @@ func TestExecute_completedLibraryIsSkipped(t *testing.T) {
 
 	fr := &runner.FakeRunner{}
 	// kiwi-parent is in Completed — no runner calls for it
-	fr.AddResponse(&runner.Result{}, nil) // mvn versions:use-dep-version (POM update for kiwi)
-	fr.AddResponse(&runner.Result{}, nil) // git add
-	fr.AddResponse(&runner.Result{}, nil) // git commit
-	fr.AddResponse(&runner.Result{}, nil) // git push
-	addLibraryResponses(fr, "v2.5.0")    // kiwi: git describe, mvn, changelog
+	addPOMUpdateResponses(fr)          // kiwi POM update
+	addLibraryResponses(fr, "v2.5.0") // kiwi: git describe, mvn, changelog
 
 	stages := makeStages(
 		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
@@ -503,9 +504,9 @@ func TestExecute_completedLibraryIsSkipped(t *testing.T) {
 	if !strings.Contains(out, "3.0.0") {
 		t.Errorf("expected version 3.0.0 in output:\n%s", out)
 	}
-	// 4 (POM update) + 3 (kiwi release) = 7 calls; no calls for kiwi-parent
-	if fr.CallCount() != 7 {
-		t.Errorf("expected 7 runner calls, got %d", fr.CallCount())
+	// 5 (POM update) + 3 (kiwi release) = 8 calls; no calls for kiwi-parent
+	if fr.CallCount() != 8 {
+		t.Errorf("expected 8 runner calls, got %d", fr.CallCount())
 	}
 }
 
@@ -550,11 +551,8 @@ func TestExecute_skippedVersionUsedInPOMUpdate(t *testing.T) {
 
 	fr := &runner.FakeRunner{}
 	// kiwi-parent completed as 2.9.0, but plan would compute 3.0.0 from 3.0.0-SNAPSHOT
-	fr.AddResponse(&runner.Result{}, nil) // mvn versions:use-dep-version (should use 2.9.0)
-	fr.AddResponse(&runner.Result{}, nil) // git add
-	fr.AddResponse(&runner.Result{}, nil) // git commit
-	fr.AddResponse(&runner.Result{}, nil) // git push
-	addLibraryResponses(fr, "v2.5.0")    // kiwi: git describe, mvn, changelog
+	addPOMUpdateResponses(fr)          // kiwi POM update (should use 2.9.0)
+	addLibraryResponses(fr, "v2.5.0") // kiwi: git describe, mvn, changelog
 
 	stages := makeStages(
 		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
@@ -581,12 +579,8 @@ func TestExecute_ciVerificationPassesAfterPOMUpdate(t *testing.T) {
 	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
-	addLibraryResponses(fr, "v2.9.0")     // kiwi-parent: git describe, mvn, changelog
-	fr.AddResponse(&runner.Result{}, nil) // mvn versions (POM update for kiwi)
-	fr.AddResponse(&runner.Result{}, nil) // git add
-	fr.AddResponse(&runner.Result{}, nil) // git commit
-	fr.AddResponse(&runner.Result{}, nil) // git push
-	// fakeCIChecker makes no runner calls; git rev-parse HEAD is called by release.go
+	addLibraryResponses(fr, "v2.9.0")                      // kiwi-parent: git describe, mvn, changelog
+	addPOMUpdateResponses(fr)                               // kiwi POM update
 	fr.AddResponse(&runner.Result{Stdout: "abc123\n"}, nil) // git rev-parse HEAD
 	addLibraryResponses(fr, "v2.5.0")                      // kiwi: git describe, mvn, changelog
 
@@ -605,8 +599,9 @@ func TestExecute_ciVerificationPassesAfterPOMUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if fr.CallCount() != 11 {
-		t.Errorf("expected 11 runner calls, got %d", fr.CallCount())
+	// 3 (kiwi-parent) + 5 (POM update) + 1 (git rev-parse) + 3 (kiwi) = 12
+	if fr.CallCount() != 12 {
+		t.Errorf("expected 12 runner calls, got %d", fr.CallCount())
 	}
 	out := buf.String()
 	if !strings.Contains(out, "CI verify") {
@@ -622,11 +617,8 @@ func TestExecute_ciVerificationFailureHalts(t *testing.T) {
 	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
-	addLibraryResponses(fr, "v2.9.0")     // kiwi-parent: git describe, mvn, changelog
-	fr.AddResponse(&runner.Result{}, nil) // mvn versions (POM update for kiwi)
-	fr.AddResponse(&runner.Result{}, nil) // git add
-	fr.AddResponse(&runner.Result{}, nil) // git commit
-	fr.AddResponse(&runner.Result{}, nil) // git push
+	addLibraryResponses(fr, "v2.9.0")                      // kiwi-parent: git describe, mvn, changelog
+	addPOMUpdateResponses(fr)                               // kiwi POM update
 	fr.AddResponse(&runner.Result{Stdout: "abc123\n"}, nil) // git rev-parse HEAD
 	// kiwi release should NOT run after CI failure
 
@@ -648,9 +640,9 @@ func TestExecute_ciVerificationFailureHalts(t *testing.T) {
 	if !strings.Contains(err.Error(), "CI verification") {
 		t.Errorf("expected 'CI verification' in error: %v", err)
 	}
-	// 3 (kiwi-parent) + 4 (POM update) + 1 (git rev-parse HEAD) = 8 calls; kiwi release never starts
-	if fr.CallCount() != 8 {
-		t.Errorf("expected 8 runner calls, got %d", fr.CallCount())
+	// 3 (kiwi-parent) + 5 (POM update) + 1 (git rev-parse HEAD) = 9 calls; kiwi release never starts
+	if fr.CallCount() != 9 {
+		t.Errorf("expected 9 runner calls, got %d", fr.CallCount())
 	}
 }
 
@@ -756,6 +748,33 @@ func TestExecute_verifyChangelogArgs(t *testing.T) {
 	}
 }
 
+func TestExecute_pomUpdateSkippedWhenAlreadyUpToDate(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.9.0")                        // kiwi-parent release
+	fr.AddResponse(&runner.Result{}, nil)                    // mvn versions:use-dep-version (no-op)
+	fr.AddResponse(&runner.Result{Stdout: ""}, nil)          // git status --porcelain: no changes
+	// git add/commit/push must NOT run
+	addLibraryResponses(fr, "v2.5.0") // kiwi release
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), defaultOpts())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// 3 (kiwi-parent) + 2 (mvn versions + git status, no commit) + 3 (kiwi) = 8
+	if fr.CallCount() != 8 {
+		t.Errorf("expected 8 runner calls (no add/commit/push), got %d", fr.CallCount())
+	}
+}
+
 func TestExecute_interactiveStageModeContinues(t *testing.T) {
 	dir := t.TempDir()
 	ws := workspace.New(dir, &prepareSuccessRunner{})
@@ -825,11 +844,8 @@ func TestExecute_interactiveStepModePromptsBeforeAndAfterCI(t *testing.T) {
 	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
-	addLibraryResponses(fr, "v2.9.0")     // kiwi-parent release
-	fr.AddResponse(&runner.Result{}, nil) // mvn versions (POM update for kiwi)
-	fr.AddResponse(&runner.Result{}, nil) // git add
-	fr.AddResponse(&runner.Result{}, nil) // git commit
-	fr.AddResponse(&runner.Result{}, nil) // git push
+	addLibraryResponses(fr, "v2.9.0")                      // kiwi-parent release
+	addPOMUpdateResponses(fr)                               // kiwi POM update
 	fr.AddResponse(&runner.Result{Stdout: "abc123\n"}, nil) // git rev-parse HEAD
 	addLibraryResponses(fr, "v2.5.0")                      // kiwi release
 
@@ -865,11 +881,8 @@ func TestExecute_interactiveStepModeStopsAfterCI(t *testing.T) {
 	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
-	addLibraryResponses(fr, "v2.9.0")     // kiwi-parent release
-	fr.AddResponse(&runner.Result{}, nil) // mvn versions
-	fr.AddResponse(&runner.Result{}, nil) // git add
-	fr.AddResponse(&runner.Result{}, nil) // git commit
-	fr.AddResponse(&runner.Result{}, nil) // git push
+	addLibraryResponses(fr, "v2.9.0")                      // kiwi-parent release
+	addPOMUpdateResponses(fr)                               // kiwi POM update
 	fr.AddResponse(&runner.Result{Stdout: "abc123\n"}, nil) // git rev-parse HEAD
 	// kiwi release should NOT run
 
@@ -894,9 +907,9 @@ func TestExecute_interactiveStepModeStopsAfterCI(t *testing.T) {
 	if !strings.Contains(out, "Stopped.") {
 		t.Errorf("expected stopped message in output:\n%s", out)
 	}
-	// 3 (kiwi-parent) + 4 (POM update) + 1 (git rev-parse) = 8; kiwi release never runs
-	if fr.CallCount() != 8 {
-		t.Errorf("expected 8 runner calls, got %d", fr.CallCount())
+	// 3 (kiwi-parent) + 5 (POM update) + 1 (git rev-parse) = 9; kiwi release never runs
+	if fr.CallCount() != 9 {
+		t.Errorf("expected 9 runner calls, got %d", fr.CallCount())
 	}
 }
 
@@ -905,11 +918,8 @@ func TestExecute_interactiveStepModeStopsBeforeCI(t *testing.T) {
 	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
-	addLibraryResponses(fr, "v2.9.0")     // kiwi-parent release
-	fr.AddResponse(&runner.Result{}, nil) // mvn versions
-	fr.AddResponse(&runner.Result{}, nil) // git add
-	fr.AddResponse(&runner.Result{}, nil) // git commit
-	fr.AddResponse(&runner.Result{}, nil) // git push
+	addLibraryResponses(fr, "v2.9.0") // kiwi-parent release
+	addPOMUpdateResponses(fr)          // kiwi POM update
 	// git rev-parse and kiwi release should NOT run
 
 	stages := makeStages(
@@ -933,8 +943,8 @@ func TestExecute_interactiveStepModeStopsBeforeCI(t *testing.T) {
 	if !strings.Contains(out, "Stopped.") {
 		t.Errorf("expected stopped message in output:\n%s", out)
 	}
-	// 3 (kiwi-parent) + 4 (POM update) = 7; git rev-parse and kiwi release never run
-	if fr.CallCount() != 7 {
-		t.Errorf("expected 7 runner calls, got %d", fr.CallCount())
+	// 3 (kiwi-parent) + 5 (POM update) = 8; git rev-parse and kiwi release never run
+	if fr.CallCount() != 8 {
+		t.Errorf("expected 8 runner calls, got %d", fr.CallCount())
 	}
 }
