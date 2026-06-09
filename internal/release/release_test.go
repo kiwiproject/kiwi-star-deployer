@@ -15,6 +15,20 @@ import (
 	"github.com/kiwiproject/kiwi-star-deployer/internal/workspace"
 )
 
+// prepareSuccessRunner satisfies runner.Runner and makes ws.Prepare succeed
+// transparently. It returns "main" for git symbolic-ref (branch check) and
+// empty success for all other calls (status, fetch, reset). Using a separate
+// runner for the workspace keeps Prepare calls out of the per-test FakeRunner
+// so existing call-count assertions don't need to change.
+type prepareSuccessRunner struct{}
+
+func (r *prepareSuccessRunner) Run(opts runner.Options) (*runner.Result, error) {
+	if opts.Command == "git" && len(opts.Args) >= 1 && opts.Args[0] == "symbolic-ref" {
+		return &runner.Result{Stdout: "main\n"}, nil
+	}
+	return &runner.Result{}, nil
+}
+
 type fakeCentral struct{ err error }
 
 func (f *fakeCentral) Wait(_ io.Writer, _, _, _ string, _, _ time.Duration) error {
@@ -66,7 +80,7 @@ func addLibraryResponses(fr *runner.FakeRunner, previousTag string) {
 
 func TestExecute_singleLibrarySuccess(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.5.0")
@@ -94,7 +108,7 @@ func TestExecute_singleLibrarySuccess(t *testing.T) {
 
 func TestExecute_completionMessageSingular(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.5.0")
@@ -114,7 +128,7 @@ func TestExecute_completionMessageSingular(t *testing.T) {
 
 func TestExecute_completionMessagePlural(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.9.0")
@@ -136,7 +150,7 @@ func TestExecute_completionMessagePlural(t *testing.T) {
 
 func TestExecute_multipleStages(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.9.0")
@@ -163,7 +177,7 @@ func TestExecute_multipleStages(t *testing.T) {
 
 func TestExecute_parallelWithinStage(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.5.0")
@@ -186,7 +200,7 @@ func TestExecute_parallelWithinStage(t *testing.T) {
 
 func TestExecute_mvnFailureHalts(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	fr.AddResponse(&runner.Result{Stdout: "v2.5.0"}, nil) // git describe succeeds
@@ -209,7 +223,7 @@ func TestExecute_mvnFailureHalts(t *testing.T) {
 
 func TestExecute_stageFailureHaltsBeforeNextStage(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	fr.AddResponse(&runner.Result{Stdout: "v2.9.0"}, nil) // git describe succeeds
@@ -233,7 +247,7 @@ func TestExecute_stageFailureHaltsBeforeNextStage(t *testing.T) {
 
 func TestExecute_centralCheckFailureHalts(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	fr.AddResponse(&runner.Result{Stdout: "v2.5.0"}, nil) // git describe
@@ -264,7 +278,7 @@ func TestExecute_centralCheckFailureHalts(t *testing.T) {
 
 func TestExecute_changelogFailureHalts(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	fr.AddResponse(&runner.Result{Stdout: "v2.5.0"}, nil) // git describe
@@ -288,7 +302,7 @@ func TestExecute_changelogFailureHalts(t *testing.T) {
 
 func TestExecute_updatesDownstreamPOMs(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.9.0") // kiwi-parent release (git describe, mvn, changelog)
@@ -319,7 +333,7 @@ func TestExecute_updatesDownstreamPOMs(t *testing.T) {
 
 func TestExecute_updatesLibraryBOMPOMs(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.9.0")     // kiwi-parent release
@@ -350,7 +364,7 @@ func TestExecute_updatesLibraryBOMPOMs(t *testing.T) {
 
 func TestExecute_pomUpdateFailureHalts(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.9.0")                    // kiwi-parent release succeeds
@@ -373,7 +387,7 @@ func TestExecute_pomUpdateFailureHalts(t *testing.T) {
 
 func TestExecute_verifyPOMUpdateArgs(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.9.0") // kiwi-parent release
@@ -422,7 +436,7 @@ func TestExecute_verifyPOMUpdateArgs(t *testing.T) {
 
 func TestExecute_verifyMvnArgs(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.5.0")
@@ -456,7 +470,7 @@ func TestExecute_verifyMvnArgs(t *testing.T) {
 
 func TestExecute_completedLibraryIsSkipped(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	// kiwi-parent is in Completed — no runner calls for it
@@ -497,7 +511,7 @@ func TestExecute_completedLibraryIsSkipped(t *testing.T) {
 
 func TestExecute_skipResolvesVersionFromGitTag(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	fr.AddResponse(&runner.Result{Stdout: "v3.0.0\n"}, nil) // git describe for kiwi-parent (--skip)
@@ -532,7 +546,7 @@ func TestExecute_skipResolvesVersionFromGitTag(t *testing.T) {
 
 func TestExecute_skippedVersionUsedInPOMUpdate(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	// kiwi-parent completed as 2.9.0, but plan would compute 3.0.0 from 3.0.0-SNAPSHOT
@@ -564,7 +578,7 @@ func TestExecute_skippedVersionUsedInPOMUpdate(t *testing.T) {
 
 func TestExecute_ciVerificationPassesAfterPOMUpdate(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.9.0")     // kiwi-parent: git describe, mvn, changelog
@@ -605,7 +619,7 @@ func TestExecute_ciVerificationPassesAfterPOMUpdate(t *testing.T) {
 
 func TestExecute_ciVerificationFailureHalts(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.9.0")     // kiwi-parent: git describe, mvn, changelog
@@ -642,7 +656,7 @@ func TestExecute_ciVerificationFailureHalts(t *testing.T) {
 
 func TestExecute_changelogSummaryPassedToScript(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.5.0")
@@ -665,7 +679,7 @@ func TestExecute_changelogSummaryPassedToScript(t *testing.T) {
 
 func TestExecute_changelogSummaryFilePassedToScript(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.5.0")
@@ -688,7 +702,7 @@ func TestExecute_changelogSummaryFilePassedToScript(t *testing.T) {
 
 func TestExecute_changelogSummaryNotPassedForOtherLibrary(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.5.0")
@@ -711,7 +725,7 @@ func TestExecute_changelogSummaryNotPassedForOtherLibrary(t *testing.T) {
 
 func TestExecute_verifyChangelogArgs(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.5.0")
@@ -744,7 +758,7 @@ func TestExecute_verifyChangelogArgs(t *testing.T) {
 
 func TestExecute_interactiveStageModeContinues(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.9.0") // kiwi-parent
@@ -776,7 +790,7 @@ func TestExecute_interactiveStageModeContinues(t *testing.T) {
 
 func TestExecute_interactiveStageModeStops(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.9.0") // kiwi-parent (stage 1)
@@ -808,7 +822,7 @@ func TestExecute_interactiveStageModeStops(t *testing.T) {
 
 func TestExecute_interactiveStepModePromptsBeforeAndAfterCI(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.9.0")     // kiwi-parent release
@@ -848,7 +862,7 @@ func TestExecute_interactiveStepModePromptsBeforeAndAfterCI(t *testing.T) {
 
 func TestExecute_interactiveStepModeStopsAfterCI(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.9.0")     // kiwi-parent release
@@ -888,7 +902,7 @@ func TestExecute_interactiveStepModeStopsAfterCI(t *testing.T) {
 
 func TestExecute_interactiveStepModeStopsBeforeCI(t *testing.T) {
 	dir := t.TempDir()
-	ws := workspace.New(dir, &runner.FakeRunner{})
+	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.9.0")     // kiwi-parent release

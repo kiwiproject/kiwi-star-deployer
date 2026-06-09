@@ -257,6 +257,11 @@ func updatePOM(entry plan.Entry, deps []plan.Entry, ws *workspace.Workspace, r r
 
 	var buf bytes.Buffer
 	out := io.MultiWriter(f, &buf)
+
+	if err := ws.Prepare(entry.Name); err != nil {
+		return fmt.Errorf("preparing workspace: %w", err)
+	}
+
 	repoDir := ws.RepoDir(entry.Name)
 
 	for _, dep := range deps {
@@ -353,6 +358,10 @@ func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, 
 
 	var buf bytes.Buffer
 	out := io.MultiWriter(f, &buf)
+
+	if err := ws.Prepare(entry.Name); err != nil {
+		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepMavenRelease, err: fmt.Errorf("preparing workspace: %w", err)}
+	}
 
 	repoDir := ws.RepoDir(entry.Name)
 	vp := entry.VersionPlan
