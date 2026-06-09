@@ -130,6 +130,7 @@ func runRelease(_ *cobra.Command, _ []string) error {
 
 	opts := release.Options{
 		GroupID:               cfg.Settings.GroupID,
+		MavenTimeout:          time.Duration(cfg.Settings.MavenReleaseTimeout),
 		MaxWait:               time.Duration(cfg.Settings.MavenCentralMaxWait),
 		PollInterval:          time.Duration(cfg.Settings.MavenCentralPollInterval),
 		Checker:               mavencentral.New(),

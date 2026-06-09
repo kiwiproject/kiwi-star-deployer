@@ -1,6 +1,9 @@
 package runner
 
-import "io"
+import (
+	"io"
+	"time"
+)
 
 // Runner executes external commands (gh, git, mvn, kiwiproject-changelog).
 // All callers must go through this interface rather than exec.Command directly.
@@ -17,6 +20,9 @@ type Options struct {
 	Stdout io.Writer
 	// If non-nil, stderr is written here (streamed); otherwise captured in Result.Stderr.
 	Stderr io.Writer
+	// Timeout, if positive, cancels the command after the given duration.
+	// Zero means no timeout.
+	Timeout time.Duration
 }
 
 // Result holds captured output from a completed command.

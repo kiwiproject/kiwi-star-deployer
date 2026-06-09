@@ -27,6 +27,7 @@ type Settings struct {
 	StatePath                string   `toml:"state_path"`
 	GroupID                  string   `toml:"group_id"`
 	ChangelogScript          string   `toml:"changelog_script"`
+	MavenReleaseTimeout      Duration `toml:"maven_release_timeout"`
 	MavenCentralMaxWait      Duration `toml:"maven_central_max_wait"`
 	MavenCentralPollInterval Duration `toml:"maven_central_poll_interval"`
 	CIVerify                 *bool    `toml:"ci_verify"`
@@ -83,6 +84,9 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Settings.ChangelogScript == "" {
 		cfg.Settings.ChangelogScript = ".generate-kiwi-changelog"
+	}
+	if cfg.Settings.MavenReleaseTimeout == 0 {
+		cfg.Settings.MavenReleaseTimeout = Duration(60 * time.Minute)
 	}
 	if cfg.Settings.MavenCentralMaxWait == 0 {
 		cfg.Settings.MavenCentralMaxWait = Duration(60 * time.Minute)

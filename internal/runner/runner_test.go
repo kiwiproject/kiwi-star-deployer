@@ -3,6 +3,7 @@ package runner_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kiwiproject/kiwi-star-deployer/internal/runner"
 )
@@ -45,6 +46,18 @@ func TestFakeRunner_recordsCalls(t *testing.T) {
 	}
 	if f.Calls[0].Command != "git" {
 		t.Errorf("expected command 'git', got %q", f.Calls[0].Command)
+	}
+}
+
+func TestOsRunner_timeoutCancelsCommand(t *testing.T) {
+	r := runner.NewOsRunner()
+	_, err := r.Run(runner.Options{
+		Command: "sleep",
+		Args:    []string{"10"},
+		Timeout: 50 * time.Millisecond,
+	})
+	if err == nil {
+		t.Fatal("expected error from timeout, got nil")
 	}
 }
 

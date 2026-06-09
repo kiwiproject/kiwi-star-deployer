@@ -472,6 +472,28 @@ func TestExecute_verifyMvnArgs(t *testing.T) {
 	}
 }
 
+func TestExecute_mavenTimeoutPassedToRunner(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.5.0")
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	opts := defaultOpts()
+	opts.MavenTimeout = 45 * time.Minute
+
+	release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), opts) //nolint:errcheck
+
+	mvnCall := fr.Calls[1] // Calls[0]=git describe, Calls[1]=mvn
+	if mvnCall.Timeout != 45*time.Minute {
+		t.Errorf("expected mvn timeout 45m, got %v", mvnCall.Timeout)
+	}
+}
+
 func TestExecute_completedLibraryIsSkipped(t *testing.T) {
 	dir := t.TempDir()
 	ws := workspace.New(dir, &prepareSuccessRunner{})

@@ -46,6 +46,9 @@ type Options struct {
 	CIChecker      CIChecker
 	CIMaxWait      time.Duration
 	CIPollInterval time.Duration
+	// MavenTimeout is the per-library timeout for the mvn release:prepare release:perform
+	// command. Zero means no timeout (not recommended for production use).
+	MavenTimeout time.Duration
 	// ChangelogSummaries maps library name to inline summary text (--summary flag).
 	ChangelogSummaries map[string]string
 	// ChangelogSummaryFiles maps library name to summary file path (--summary-file flag).
@@ -405,6 +408,7 @@ func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, 
 		WorkingDir: repoDir,
 		Stdout:     out,
 		Stderr:     out,
+		Timeout:    opts.MavenTimeout,
 	}); err != nil {
 		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepMavenRelease, err: fmt.Errorf("mvn release: %w", err)}
 	}
