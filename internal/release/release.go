@@ -269,19 +269,13 @@ func updatePOM(entry plan.Entry, deps []plan.Entry, ws *workspace.Workspace, r r
 
 	for _, dep := range deps {
 		if _, err := r.Run(runner.Options{
-			Command: "mvn",
-			Args: []string{
-				"-B",
-				"versions:use-dep-version",
-				"-Dincludes=" + groupID + ":" + dep.Name,
-				"-DdepVersion=" + dep.VersionPlan.ReleaseVersion,
-				"-DgenerateBackupPoms=false",
-			},
+			Command:    "mvn",
+			Args:       mavenVersionArgs(entry, dep, groupID),
 			WorkingDir: repoDir,
 			Stdout:     out,
 			Stderr:     out,
 		}); err != nil {
-			return fmt.Errorf("mvn versions:use-dep-version for %s: %w", dep.Name, err)
+			return fmt.Errorf("mvn versions for %s: %w", dep.Name, err)
 		}
 	}
 
@@ -328,6 +322,31 @@ func updatePOM(entry plan.Entry, deps []plan.Entry, ws *workspace.Workspace, r r
 	}
 
 	return nil
+}
+
+// mavenVersionArgs returns the mvn arguments for updating one dependency version
+// in a downstream POM. library-bom POMs manage versions via properties named
+// exactly <artifactId>.version (e.g., kiwi.version for artifactId kiwi). If a
+// dep uses a literal version element instead, set-property will silently do
+// nothing and the git status check in updatePOM will skip the commit, surfacing
+// the mismatch without corrupting the POM.
+func mavenVersionArgs(entry plan.Entry, dep plan.Entry, groupID string) []string {
+	if entry.IsLibraryBOM() {
+		return []string{
+			"-B",
+			"versions:set-property",
+			"-Dproperty=" + dep.Name + ".version",
+			"-DnewVersion=" + dep.VersionPlan.ReleaseVersion,
+			"-DgenerateBackupPoms=false",
+		}
+	}
+	return []string{
+		"-B",
+		"versions:use-dep-version",
+		"-Dincludes=" + groupID + ":" + dep.Name,
+		"-DdepVersion=" + dep.VersionPlan.ReleaseVersion,
+		"-DgenerateBackupPoms=false",
+	}
 }
 
 func buildPOMUpdateCommitMessage(deps []plan.Entry) string {

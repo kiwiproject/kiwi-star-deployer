@@ -79,9 +79,10 @@ func addLibraryResponses(fr *runner.FakeRunner, previousTag string) {
 }
 
 // addPOMUpdateResponses adds the five runner responses for one successful POM update:
-// mvn versions:use-dep-version, git status --porcelain (reports changes), git add, git commit, git push.
+// mvn versions (use-dep-version or set-property), git status --porcelain (reports changes),
+// git add, git commit, git push.
 func addPOMUpdateResponses(fr *runner.FakeRunner) {
-	fr.AddResponse(&runner.Result{}, nil)                        // mvn versions:use-dep-version
+	fr.AddResponse(&runner.Result{}, nil)                        // mvn versions
 	fr.AddResponse(&runner.Result{Stdout: " M pom.xml\n"}, nil) // git status --porcelain
 	fr.AddResponse(&runner.Result{}, nil)                        // git add
 	fr.AddResponse(&runner.Result{}, nil)                        // git commit
@@ -344,9 +345,9 @@ func TestExecute_updatesLibraryBOMPOMs(t *testing.T) {
 	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
-	addLibraryResponses(fr, "v2.9.0")  // kiwi-parent release
-	addPOMUpdateResponses(fr)           // kiwi-libraries-bom POM update
-	addLibraryResponses(fr, "v1.0.0")  // kiwi-libraries-bom release
+	addLibraryResponses(fr, "v2.9.0") // kiwi-parent release
+	addPOMUpdateResponses(fr)          // kiwi-libraries-bom POM update
+	addLibraryResponses(fr, "v1.0.0") // kiwi-libraries-bom release
 
 	stages := makeStages(
 		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
@@ -365,6 +366,45 @@ func TestExecute_updatesLibraryBOMPOMs(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "POM update") {
 		t.Errorf("expected POM update in output:\n%s", out)
+	}
+}
+
+func TestExecute_libraryBOMUsesSetProperty(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.9.0") // kiwi-parent release
+	addPOMUpdateResponses(fr)          // kiwi-libraries-bom POM update
+	addLibraryResponses(fr, "v1.0.0") // kiwi-libraries-bom release
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-libraries-bom", Repo: "kiwiproject/kiwi-libraries-bom", Stage: 2, Type: "library-bom", DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi-libraries-bom", "2.0.0-SNAPSHOT", "")},
+	)
+
+	release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), defaultOpts()) //nolint:errcheck
+
+	// Calls: [0]=git describe, [1]=mvn release, [2]=changelog, [3]=mvn versions (BOM update)
+	mvnVersionsCall := fr.Calls[3]
+	if mvnVersionsCall.Command != "mvn" {
+		t.Errorf("expected mvn, got %s", mvnVersionsCall.Command)
+	}
+	versionArgs := strings.Join(mvnVersionsCall.Args, " ")
+	for _, want := range []string{
+		"versions:set-property",
+		"-Dproperty=kiwi-parent.version",
+		"-DnewVersion=3.0.0",
+		"-DgenerateBackupPoms=false",
+	} {
+		if !strings.Contains(versionArgs, want) {
+			t.Errorf("expected %q in mvn versions args: %s", want, versionArgs)
+		}
+	}
+	for _, notWant := range []string{"versions:use-dep-version", "-Dincludes="} {
+		if strings.Contains(versionArgs, notWant) {
+			t.Errorf("unexpected %q in library-bom mvn args: %s", notWant, versionArgs)
+		}
 	}
 }
 
