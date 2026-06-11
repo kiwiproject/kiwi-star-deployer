@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kiwiproject/kiwi-star-deployer/internal/config"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/plan"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/runner"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/state"
@@ -270,7 +271,7 @@ func updatePOM(entry plan.Entry, deps []plan.Entry, ws *workspace.Workspace, r r
 	for _, dep := range deps {
 		if _, err := r.Run(runner.Options{
 			Command:    "mvn",
-			Args:       mavenVersionArgs(entry, dep, groupID),
+			Args:       mavenVersionArgs(dep, groupID),
 			WorkingDir: repoDir,
 			Stdout:     out,
 			Stderr:     out,
@@ -325,26 +326,31 @@ func updatePOM(entry plan.Entry, deps []plan.Entry, ws *workspace.Workspace, r r
 }
 
 // mavenVersionArgs returns the mvn arguments for updating one dependency version
-// in a downstream POM. library-bom POMs manage versions via properties named
-// exactly <artifactId>.version (e.g., kiwi.version for artifactId kiwi). If a
-// dep uses a literal version element instead, set-property will silently do
-// nothing and the git status check in updatePOM will skip the commit, surfacing
-// the mismatch without corrupting the POM.
-func mavenVersionArgs(entry plan.Entry, dep plan.Entry, groupID string) []string {
-	if entry.IsLibraryBOM() {
+// in a downstream POM.
+//
+// parent-pom deps are declared as a literal version in <parent>, so
+// versions:use-dep-version handles them. All other dep types (bom, library-bom,
+// regular libraries) are declared via a property named exactly
+// <artifactId>.version (e.g., kiwi-bom.version, kiwi.version), so
+// versions:set-property is required. If a dep deviates from this convention and
+// uses a literal version element, set-property will silently do nothing and the
+// git status check in updatePOM will skip the commit, surfacing the mismatch
+// without corrupting the POM.
+func mavenVersionArgs(dep plan.Entry, groupID string) []string {
+	if dep.Type == config.TypeParentPOM {
 		return []string{
 			"-B",
-			"versions:set-property",
-			"-Dproperty=" + dep.Name + ".version",
-			"-DnewVersion=" + dep.VersionPlan.ReleaseVersion,
+			"versions:use-dep-version",
+			"-Dincludes=" + groupID + ":" + dep.Name,
+			"-DdepVersion=" + dep.VersionPlan.ReleaseVersion,
 			"-DgenerateBackupPoms=false",
 		}
 	}
 	return []string{
 		"-B",
-		"versions:use-dep-version",
-		"-Dincludes=" + groupID + ":" + dep.Name,
-		"-DdepVersion=" + dep.VersionPlan.ReleaseVersion,
+		"versions:set-property",
+		"-Dproperty=" + dep.Name + ".version",
+		"-DnewVersion=" + dep.VersionPlan.ReleaseVersion,
 		"-DgenerateBackupPoms=false",
 	}
 }

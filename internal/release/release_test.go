@@ -369,23 +369,23 @@ func TestExecute_updatesLibraryBOMPOMs(t *testing.T) {
 	}
 }
 
-func TestExecute_libraryBOMUsesSetProperty(t *testing.T) {
+func TestExecute_nonParentPOMDepUsesSetProperty(t *testing.T) {
 	dir := t.TempDir()
 	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
-	addLibraryResponses(fr, "v2.9.0") // kiwi-parent release
-	addPOMUpdateResponses(fr)          // kiwi-libraries-bom POM update
-	addLibraryResponses(fr, "v1.0.0") // kiwi-libraries-bom release
+	addLibraryResponses(fr, "v2.5.0") // kiwi release (no type — regular library)
+	addPOMUpdateResponses(fr)          // kiwi-test POM update
+	addLibraryResponses(fr, "v3.0.0") // kiwi-test release
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi-libraries-bom", Repo: "kiwiproject/kiwi-libraries-bom", Stage: 2, Type: "library-bom", DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi-libraries-bom", "2.0.0-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-test", Repo: "kiwiproject/kiwi-test", Stage: 2, DependsOn: []string{"kiwi"}, VersionPlan: mustPlan("kiwi-test", "3.0.1-SNAPSHOT", "")},
 	)
 
 	release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), defaultOpts()) //nolint:errcheck
 
-	// Calls: [0]=git describe, [1]=mvn release, [2]=changelog, [3]=mvn versions (BOM update)
+	// Calls: [0]=git describe, [1]=mvn release, [2]=changelog, [3]=mvn versions (POM update)
 	mvnVersionsCall := fr.Calls[3]
 	if mvnVersionsCall.Command != "mvn" {
 		t.Errorf("expected mvn, got %s", mvnVersionsCall.Command)
@@ -393,8 +393,8 @@ func TestExecute_libraryBOMUsesSetProperty(t *testing.T) {
 	versionArgs := strings.Join(mvnVersionsCall.Args, " ")
 	for _, want := range []string{
 		"versions:set-property",
-		"-Dproperty=kiwi-parent.version",
-		"-DnewVersion=3.0.0",
+		"-Dproperty=kiwi.version",
+		"-DnewVersion=2.5.1",
 		"-DgenerateBackupPoms=false",
 	} {
 		if !strings.Contains(versionArgs, want) {
@@ -403,7 +403,7 @@ func TestExecute_libraryBOMUsesSetProperty(t *testing.T) {
 	}
 	for _, notWant := range []string{"versions:use-dep-version", "-Dincludes="} {
 		if strings.Contains(versionArgs, notWant) {
-			t.Errorf("unexpected %q in library-bom mvn args: %s", notWant, versionArgs)
+			t.Errorf("unexpected %q in non-parent-pom mvn args: %s", notWant, versionArgs)
 		}
 	}
 }
@@ -441,7 +441,7 @@ func TestExecute_verifyPOMUpdateArgs(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0") // kiwi release
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Type: "parent-pom", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
 		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
 	)
 
@@ -617,7 +617,7 @@ func TestExecute_skippedVersionUsedInPOMUpdate(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0") // kiwi: git describe, mvn, changelog
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Type: "parent-pom", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
 		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
 	)
 

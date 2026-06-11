@@ -169,12 +169,15 @@ Duration values use Go duration syntax: `30s`, `5m`, `1h30m`.
 | `library-bom` | Library-managed BOM; at most one per config |
 
 > [!WARNING]
-> A `library-bom` POM must declare each managed dependency's version as a
-> property named exactly `<artifactId>.version` — for example
-> `<kiwi.version>5.3.1</kiwi.version>` for artifactId `kiwi`. The tool uses
-> `mvn versions:set-property` to update these properties before release. If a
-> dependency uses a literal version element instead of a property, the update
-> will silently do nothing and the release will proceed with the stale version.
+> Every library whose POM is updated by this tool (all non-`parent-pom` types)
+> must declare each kiwiproject dependency version as a property named exactly
+> `<artifactId>.version` — for example `<kiwi-bom.version>3.2.0</kiwi-bom.version>`
+> for artifactId `kiwi-bom`. The tool uses `mvn versions:set-property` to update
+> these properties before release. If a dependency uses a literal version element
+> or a differently-named property, the update will silently do nothing and the
+> release will proceed with the stale version. The only exception is `parent-pom`
+> dependencies, which are declared as a literal version in `<parent>` and updated
+> via `mvn versions:use-dep-version`.
 
 ## Changelog tool configuration
 
