@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/kiwiproject/kiwi-star-deployer/internal/config"
@@ -62,7 +63,45 @@ func Build(cfg *config.Config, ws *workspace.Workspace) ([][]Entry, error) {
 			})
 		}
 	}
+	if err := validatePOMProperties(result, cfg, ws); err != nil {
+		return nil, err
+	}
 	return result, nil
+}
+
+// validatePOMProperties checks that every library's pom.xml contains a property
+// named <dep>.version for each non-parent-pom dependency. All violations are
+// collected and returned as a single error so the user can fix them all at once.
+func validatePOMProperties(stages [][]Entry, cfg *config.Config, ws *workspace.Workspace) error {
+	var errs []string
+	for _, stage := range stages {
+		for _, entry := range stage {
+			var needed []string
+			for _, depName := range entry.DependsOn {
+				if cfg.Libraries[depName].Type != config.TypeParentPOM {
+					needed = append(needed, depName)
+				}
+			}
+			if len(needed) == 0 {
+				continue
+			}
+			pomPath := filepath.Join(ws.RepoDir(entry.Name), "pom.xml")
+			props, err := pom.ReadProperties(pomPath)
+			if err != nil {
+				return fmt.Errorf("reading POM properties for %s: %w", entry.Name, err)
+			}
+			for _, depName := range needed {
+				propName := depName + ".version"
+				if _, ok := props[propName]; !ok {
+					errs = append(errs, fmt.Sprintf("  %s: missing property %q for dependency %s", entry.Name, propName, depName))
+				}
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("POM property validation failed:\n%s", strings.Join(errs, "\n"))
+	}
+	return nil
 }
 
 // Print writes the plan to w in a columnar format, one library per line.

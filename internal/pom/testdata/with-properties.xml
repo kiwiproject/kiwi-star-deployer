@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.kiwiproject</groupId>
+        <artifactId>kiwi-parent</artifactId>
+        <version>3.0.40</version>
+    </parent>
+    <artifactId>kiwi</artifactId>
+    <version>5.3.1-SNAPSHOT</version>
+    <properties>
+        <kiwi-bom.version>3.2.0</kiwi-bom.version>
+        <kiwi-test.version>4.1.0</kiwi-test.version>
+        <sonar.projectKey>kiwiproject_kiwi</sonar.projectKey>
+    </properties>
+</project>

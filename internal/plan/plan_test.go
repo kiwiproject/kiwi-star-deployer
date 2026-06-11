@@ -15,19 +15,36 @@ import (
 	"github.com/kiwiproject/kiwi-star-deployer/internal/workspace"
 )
 
-// createRepo writes a minimal pom.xml into wsDir/<name>/ so EnsureCloned skips cloning.
+// createRepo writes a minimal pom.xml (no <properties>) into wsDir/<name>/.
 func createRepo(t *testing.T, wsDir, name, pomVersion string) {
+	t.Helper()
+	createRepoWithProperties(t, wsDir, name, pomVersion, nil)
+}
+
+// createRepoWithProperties writes a pom.xml with an optional <properties> block.
+// props maps property name to value; nil means no <properties> element.
+func createRepoWithProperties(t *testing.T, wsDir, name, pomVersion string, props map[string]string) {
 	t.Helper()
 	repoDir := filepath.Join(wsDir, name)
 	if err := os.MkdirAll(repoDir, 0o755); err != nil {
 		t.Fatal(err)
+	}
+	var propBlock string
+	if len(props) > 0 {
+		var sb strings.Builder
+		sb.WriteString("    <properties>\n")
+		for k, v := range props {
+			fmt.Fprintf(&sb, "        <%s>%s</%s>\n", k, v, k)
+		}
+		sb.WriteString("    </properties>\n")
+		propBlock = sb.String()
 	}
 	content := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0">
     <modelVersion>4.0.0</modelVersion>
     <artifactId>%s</artifactId>
     <version>%s</version>
-</project>`, name, pomVersion)
+%s</project>`, name, pomVersion, propBlock)
 	if err := os.WriteFile(filepath.Join(repoDir, "pom.xml"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +107,7 @@ func TestBuild_respectsStageOrder(t *testing.T) {
 	dir, ws := makeWorkspace(t)
 	createRepo(t, dir, "kiwi-parent", "3.0.0-SNAPSHOT")
 	createRepo(t, dir, "kiwi-bom", "2.0.0-SNAPSHOT")
-	createRepo(t, dir, "kiwi", "4.0.0-SNAPSHOT")
+	createRepoWithProperties(t, dir, "kiwi", "4.0.0-SNAPSHOT", map[string]string{"kiwi-bom.version": "2.0.0"})
 
 	cfg := &config.Config{
 		Settings: config.Settings{Workspace: dir},
@@ -178,6 +195,105 @@ func TestBuild_appliesOverride(t *testing.T) {
 	}
 	if !entry.VersionPlan.OverrideApplied {
 		t.Error("OverrideApplied: got false, want true")
+	}
+}
+
+func TestBuild_validationPassesWhenPropertiesPresent(t *testing.T) {
+	dir, ws := makeWorkspace(t)
+	createRepo(t, dir, "kiwi-parent", "3.0.0-SNAPSHOT")
+	createRepo(t, dir, "kiwi-bom", "2.0.0-SNAPSHOT") // depends only on kiwi-parent (parent-pom); no property needed
+	createRepoWithProperties(t, dir, "kiwi", "4.0.0-SNAPSHOT", map[string]string{
+		"kiwi-bom.version": "2.0.0",
+	})
+
+	cfg := &config.Config{
+		Settings: config.Settings{Workspace: dir},
+		Libraries: map[string]config.Library{
+			"kiwi-parent": {Repo: "kiwiproject/kiwi-parent", Type: "parent-pom"},
+			"kiwi-bom":    {Repo: "kiwiproject/kiwi-bom", Type: "bom", DependsOn: []string{"kiwi-parent"}},
+			"kiwi":        {Repo: "kiwiproject/kiwi", DependsOn: []string{"kiwi-parent", "kiwi-bom"}},
+		},
+	}
+
+	_, err := plan.Build(cfg, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBuild_validationFailsWhenPropertyMissing(t *testing.T) {
+	dir, ws := makeWorkspace(t)
+	createRepo(t, dir, "kiwi-bom", "2.0.0-SNAPSHOT")
+	// kiwi is missing kiwi-bom.version property
+	createRepo(t, dir, "kiwi", "4.0.0-SNAPSHOT")
+
+	cfg := &config.Config{
+		Settings: config.Settings{Workspace: dir},
+		Libraries: map[string]config.Library{
+			"kiwi-bom": {Repo: "kiwiproject/kiwi-bom", Type: "bom"},
+			"kiwi":     {Repo: "kiwiproject/kiwi", DependsOn: []string{"kiwi-bom"}},
+		},
+	}
+
+	_, err := plan.Build(cfg, ws)
+	if err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+	if !strings.Contains(err.Error(), "kiwi-bom.version") {
+		t.Errorf("expected missing property name in error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "kiwi") {
+		t.Errorf("expected library name in error: %v", err)
+	}
+}
+
+func TestBuild_validationCollectsAllErrors(t *testing.T) {
+	dir, ws := makeWorkspace(t)
+	// Both kiwi and kiwi-test are missing their kiwi-bom.version property
+	createRepo(t, dir, "kiwi-bom", "2.0.0-SNAPSHOT")
+	createRepo(t, dir, "kiwi", "4.0.0-SNAPSHOT")
+	createRepo(t, dir, "kiwi-test", "3.0.0-SNAPSHOT")
+
+	cfg := &config.Config{
+		Settings: config.Settings{Workspace: dir},
+		Libraries: map[string]config.Library{
+			"kiwi-bom":  {Repo: "kiwiproject/kiwi-bom", Type: "bom"},
+			"kiwi":      {Repo: "kiwiproject/kiwi", DependsOn: []string{"kiwi-bom"}},
+			"kiwi-test": {Repo: "kiwiproject/kiwi-test", DependsOn: []string{"kiwi-bom"}},
+		},
+	}
+
+	_, err := plan.Build(cfg, ws)
+	if err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+	msg := err.Error()
+	// Check entry name at start of each error line to distinguish "kiwi" from "kiwi-test"
+	if !strings.Contains(msg, "kiwi: missing property") {
+		t.Errorf("expected kiwi error line in message: %v", err)
+	}
+	if !strings.Contains(msg, "kiwi-test: missing property") {
+		t.Errorf("expected kiwi-test error line in message: %v", err)
+	}
+}
+
+func TestBuild_validationSkipsParentPOMDeps(t *testing.T) {
+	dir, ws := makeWorkspace(t)
+	createRepo(t, dir, "kiwi-parent", "3.0.0-SNAPSHOT")
+	// kiwi has no properties — kiwi-parent is parent-pom type so no property needed
+	createRepo(t, dir, "kiwi", "4.0.0-SNAPSHOT")
+
+	cfg := &config.Config{
+		Settings: config.Settings{Workspace: dir},
+		Libraries: map[string]config.Library{
+			"kiwi-parent": {Repo: "kiwiproject/kiwi-parent", Type: "parent-pom"},
+			"kiwi":        {Repo: "kiwiproject/kiwi", DependsOn: []string{"kiwi-parent"}},
+		},
+	}
+
+	_, err := plan.Build(cfg, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

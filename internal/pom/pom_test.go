@@ -73,3 +73,47 @@ func TestReadVersion_fileNotFoundIsError(t *testing.T) {
 		t.Fatal("expected error for missing file, got nil")
 	}
 }
+
+func TestReadProperties_returnsProperties(t *testing.T) {
+	props, err := pom.ReadProperties("testdata/with-properties.xml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := map[string]string{
+		"kiwi-bom.version":  "3.2.0",
+		"kiwi-test.version": "4.1.0",
+		"sonar.projectKey":  "kiwiproject_kiwi",
+	}
+	for k, v := range want {
+		if got := props[k]; got != v {
+			t.Errorf("property %q: got %q, want %q", k, got, v)
+		}
+	}
+	if len(props) != len(want) {
+		t.Errorf("property count: got %d, want %d", len(props), len(want))
+	}
+}
+
+func TestReadProperties_noPropertiesReturnsEmptyMap(t *testing.T) {
+	props, err := pom.ReadProperties("testdata/snapshot.xml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(props) != 0 {
+		t.Errorf("expected empty map, got %v", props)
+	}
+}
+
+func TestReadProperties_fileNotFoundIsError(t *testing.T) {
+	_, err := pom.ReadProperties("testdata/nonexistent.xml")
+	if err == nil {
+		t.Fatal("expected error for missing file, got nil")
+	}
+}
+
+func TestReadProperties_invalidXMLIsError(t *testing.T) {
+	_, err := pom.ReadProperties("testdata/invalid.xml")
+	if err == nil {
+		t.Fatal("expected error for invalid XML, got nil")
+	}
+}
