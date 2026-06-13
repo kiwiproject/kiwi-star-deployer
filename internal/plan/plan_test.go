@@ -302,7 +302,7 @@ func TestPrint_basicOutput(t *testing.T) {
 		{{Name: "kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")}},
 		{
 			{Name: "kiwi-bom", Stage: 2, VersionPlan: mustPlan("kiwi-bom", "2.0.0-SNAPSHOT", "")},
-			{Name: "kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "4.0.0-SNAPSHOT", "3.0.0")},
+			{Name: "kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "4.0.0-SNAPSHOT", "5.0.0")},
 		},
 	}
 

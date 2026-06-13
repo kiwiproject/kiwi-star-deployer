@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-var semverRe = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
+var semverRe = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
 
 var validTypes = map[string]bool{
 	"":             true,

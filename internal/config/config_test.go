@@ -210,6 +210,17 @@ kiwi = "not-a-version"
 			wantErr: "not a valid version",
 		},
 		{
+			name: "override version with leading zero",
+			content: `
+[library.kiwi]
+repo = "kiwiproject/kiwi"
+
+[release.overrides]
+kiwi = "01.2.3"
+`,
+			wantErr: "not a valid version",
+		},
+		{
 			name: "override for unknown library",
 			content: `
 [library.kiwi]
