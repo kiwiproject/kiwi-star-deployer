@@ -144,6 +144,95 @@ func TestWriter_RecordCompleted_concurrentSafe(t *testing.T) {
 	}
 }
 
+func TestWriter_SetLogDir(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	w, err := state.New(path, "run-1")
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+
+	if err := w.SetLogDir("/logs/2025-11-15T14-30-00"); err != nil {
+		t.Fatalf("SetLogDir: %v", err)
+	}
+
+	s, err := state.Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if s.LogDir != "/logs/2025-11-15T14-30-00" {
+		t.Errorf("log_dir: got %q, want /logs/2025-11-15T14-30-00", s.LogDir)
+	}
+}
+
+func TestResume_preservesRunIDAndCompletedAndLogDir(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	orig, err := state.New(path, "2025-11-15T14:30:00Z")
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	_ = orig.SetLogDir("/logs/2025-11-15T14-30-00")
+	_ = orig.RecordCompleted("kiwi-parent", "3.0.0")
+	_ = orig.RecordFailed("kiwi", state.StepMavenRelease, "exit status 1")
+
+	w, err := state.Resume(path, func() *state.State {
+		s, _ := state.Load(path)
+		return s
+	}())
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	_ = w
+
+	s, err := state.Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if s.RunID != "2025-11-15T14:30:00Z" {
+		t.Errorf("run_id: got %q, want original", s.RunID)
+	}
+	if s.LogDir != "/logs/2025-11-15T14-30-00" {
+		t.Errorf("log_dir: got %q, want original", s.LogDir)
+	}
+	if len(s.Completed) != 1 || s.Completed[0].Library != "kiwi-parent" {
+		t.Errorf("completed: got %v, want kiwi-parent", s.Completed)
+	}
+	if s.Failed != nil {
+		t.Errorf("failed: got %v, want nil (should be cleared on resume)", s.Failed)
+	}
+}
+
+func TestResume_withNoLogDir(t *testing.T) {
+	// A state file from before log_dir was introduced has an empty LogDir.
+	// Resume should copy it as empty without error.
+	path := filepath.Join(t.TempDir(), "state.json")
+	orig, err := state.New(path, "old-run")
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	_ = orig.RecordCompleted("kiwi", "1.0.0")
+
+	prev, err := state.Load(path)
+	if err != nil {
+		t.Fatalf("load prev: %v", err)
+	}
+	w, err := state.Resume(path, prev)
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	_ = w
+
+	s, err := state.Load(path)
+	if err != nil {
+		t.Fatalf("load after resume: %v", err)
+	}
+	if s.LogDir != "" {
+		t.Errorf("log_dir: got %q, want empty", s.LogDir)
+	}
+	if s.RunID != "old-run" {
+		t.Errorf("run_id: got %q, want old-run", s.RunID)
+	}
+}
+
 func TestWriter_nilSafe(t *testing.T) {
 	var w *state.Writer
 	if err := w.RecordCompleted("kiwi", "1.0.0"); err != nil {
@@ -151,6 +240,9 @@ func TestWriter_nilSafe(t *testing.T) {
 	}
 	if err := w.RecordFailed("kiwi", state.StepMavenRelease, "err"); err != nil {
 		t.Errorf("nil RecordFailed should not error: %v", err)
+	}
+	if err := w.SetLogDir("/logs/run"); err != nil {
+		t.Errorf("nil SetLogDir should not error: %v", err)
 	}
 }
 

@@ -102,11 +102,13 @@ func runRelease(_ *cobra.Command, _ []string) error {
 	logBaseDir := filepath.Join(filepath.Dir(cfg.Settings.Workspace), "logs")
 
 	var completedVersions map[string]string
+	var prevState *state.State
 	if resume {
 		s, err := state.Load(cfg.Settings.StatePath)
 		if err != nil {
 			return fmt.Errorf("loading state file for --resume: %w", err)
 		}
+		prevState = s
 		completedVersions = make(map[string]string, len(s.Completed))
 		for _, e := range s.Completed {
 			if _, ok := cfg.Libraries[e.Library]; !ok {
@@ -123,13 +125,25 @@ func runRelease(_ *cobra.Command, _ []string) error {
 		}
 	}
 
-	sw, err := state.New(cfg.Settings.StatePath, time.Now().UTC().Format(time.RFC3339))
-	if err != nil {
-		return fmt.Errorf("creating state file: %w", err)
+	var sw *state.Writer
+	var swErr error
+	if prevState != nil {
+		sw, swErr = state.Resume(cfg.Settings.StatePath, prevState)
+	} else {
+		sw, swErr = state.New(cfg.Settings.StatePath, time.Now().UTC().Format(time.RFC3339))
+	}
+	if swErr != nil {
+		return fmt.Errorf("initializing state file: %w", swErr)
+	}
+
+	var resumeLogDir string
+	if prevState != nil {
+		resumeLogDir = prevState.LogDir
 	}
 
 	opts := release.Options{
 		GroupID:               cfg.Settings.GroupID,
+		LogDir:                resumeLogDir,
 		MavenTimeout:          time.Duration(cfg.Settings.MavenReleaseTimeout),
 		MaxWait:               time.Duration(cfg.Settings.MavenCentralMaxWait),
 		PollInterval:          time.Duration(cfg.Settings.MavenCentralPollInterval),

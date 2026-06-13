@@ -47,6 +47,10 @@ type Options struct {
 	CIChecker      CIChecker
 	CIMaxWait      time.Duration
 	CIPollInterval time.Duration
+	// LogDir pins the log directory for this run. When set (resume case), Execute
+	// reuses it so all logs for a logical run stay in one directory. When empty,
+	// Execute creates a new timestamped directory under logBaseDir.
+	LogDir string
 	// MavenTimeout is the per-library timeout for the mvn release:prepare release:perform
 	// command. Zero means no timeout (not recommended for production use).
 	MavenTimeout time.Duration
@@ -80,9 +84,18 @@ type libraryResult struct {
 // released in parallel. If any library in a stage fails, execution halts
 // before the next stage begins.
 func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runner.Runner, logBaseDir string, opts Options) error {
-	logDir, err := createLogDir(logBaseDir)
-	if err != nil {
+	logDir := opts.LogDir
+	if logDir == "" {
+		var err error
+		logDir, err = createLogDir(logBaseDir)
+		if err != nil {
+			return fmt.Errorf("creating log directory: %w", err)
+		}
+	} else if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return fmt.Errorf("creating log directory: %w", err)
+	}
+	if err := opts.StateWriter.SetLogDir(logDir); err != nil {
+		return fmt.Errorf("recording log directory in state: %w", err)
 	}
 	fmt.Fprintf(w, "Logs: %s\n\n", logDir)
 

@@ -21,6 +21,7 @@ const (
 
 type State struct {
 	RunID     string           `json:"run_id"`
+	LogDir    string           `json:"log_dir,omitempty"`
 	Completed []CompletedEntry `json:"completed"`
 	Failed    *FailedEntry     `json:"failed,omitempty"`
 }
@@ -58,6 +59,26 @@ func New(path, runID string) (*Writer, error) {
 	return w, w.flush()
 }
 
+// Resume creates a Writer that continues a previous run. The original RunID,
+// LogDir, and completed entries are preserved. The failed entry is cleared so
+// the resumed run starts fresh from where it left off. prev must not be nil.
+func Resume(path string, prev *State) (*Writer, error) {
+	if prev == nil {
+		return nil, fmt.Errorf("Resume: prev state must not be nil")
+	}
+	completed := make([]CompletedEntry, len(prev.Completed))
+	copy(completed, prev.Completed)
+	w := &Writer{
+		path: path,
+		state: State{
+			RunID:     prev.RunID,
+			LogDir:    prev.LogDir,
+			Completed: completed,
+		},
+	}
+	return w, w.flush()
+}
+
 // RecordCompleted appends a completed entry and flushes to disk. Safe to call
 // from concurrent goroutines.
 func (w *Writer) RecordCompleted(library, version string) error {
@@ -87,6 +108,17 @@ func (w *Writer) RecordFailed(library, step, errMsg string) error {
 		Step:    step,
 		Error:   errMsg,
 	}
+	return w.flush()
+}
+
+// SetLogDir records the log directory for this run and flushes to disk.
+func (w *Writer) SetLogDir(dir string) error {
+	if w == nil {
+		return nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.state.LogDir = dir
 	return w.flush()
 }
 
