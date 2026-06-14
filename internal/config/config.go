@@ -35,6 +35,11 @@ type Settings struct {
 	CIPollInterval           Duration `toml:"ci_poll_interval"`
 }
 
+// LogsDir returns the base directory where release run logs are stored.
+func (s Settings) LogsDir() string {
+	return filepath.Join(filepath.Dir(s.Workspace), "logs")
+}
+
 type Library struct {
 	Repo      string   `toml:"repo"`
 	Type      string   `toml:"type"`

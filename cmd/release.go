@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -99,7 +98,7 @@ func runRelease(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	logBaseDir := filepath.Join(filepath.Dir(cfg.Settings.Workspace), "logs")
+	logBaseDir := cfg.Settings.LogsDir()
 
 	var completedVersions map[string]string
 	var prevState *state.State
