@@ -97,6 +97,7 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 	if err := opts.StateWriter.SetLogDir(logDir); err != nil {
 		return fmt.Errorf("recording log directory in state: %w", err)
 	}
+	defer func() { _ = opts.StateWriter.Archive(logDir) }()
 	fmt.Fprintf(w, "Logs: %s\n\n", logDir)
 
 	skipVersions, err := buildSkipVersions(opts, ws, r)

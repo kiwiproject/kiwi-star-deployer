@@ -111,6 +111,35 @@ func (w *Writer) RecordFailed(library, step, errMsg string) error {
 	return w.flush()
 }
 
+// Archive writes the current state to destDir/state.json. It is intended to be
+// called at the end of a run (via defer) so the log directory is self-contained.
+func (w *Writer) Archive(destDir string) error {
+	if w == nil {
+		return nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	data, err := json.MarshalIndent(w.state, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(destDir, "state-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return os.Rename(tmpName, filepath.Join(destDir, "state.json"))
+}
+
 // SetLogDir records the log directory for this run and flushes to disk.
 func (w *Writer) SetLogDir(dir string) error {
 	if w == nil {

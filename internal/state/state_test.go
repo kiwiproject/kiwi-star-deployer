@@ -144,6 +144,38 @@ func TestWriter_RecordCompleted_concurrentSafe(t *testing.T) {
 	}
 }
 
+func TestWriter_Archive_writesStateToDestDir(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	w, err := state.New(path, "run-1")
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	_ = w.RecordCompleted("kiwi-parent", "3.1.0")
+
+	destDir := t.TempDir()
+	if err := w.Archive(destDir); err != nil {
+		t.Fatalf("Archive: %v", err)
+	}
+
+	s, err := state.Load(filepath.Join(destDir, "state.json"))
+	if err != nil {
+		t.Fatalf("load archived state: %v", err)
+	}
+	if s.RunID != "run-1" {
+		t.Errorf("run_id: got %q, want run-1", s.RunID)
+	}
+	if len(s.Completed) != 1 || s.Completed[0].Library != "kiwi-parent" {
+		t.Errorf("completed: got %v, want kiwi-parent", s.Completed)
+	}
+}
+
+func TestWriter_Archive_nilSafe(t *testing.T) {
+	var w *state.Writer
+	if err := w.Archive(t.TempDir()); err != nil {
+		t.Errorf("nil Archive should not error: %v", err)
+	}
+}
+
 func TestWriter_SetLogDir(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	w, err := state.New(path, "run-1")
