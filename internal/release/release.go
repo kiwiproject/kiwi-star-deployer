@@ -98,6 +98,15 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 		return fmt.Errorf("recording log directory in state: %w", err)
 	}
 	defer func() { _ = opts.StateWriter.Archive(logDir) }()
+	sessionLog, err := openSessionLog(logDir, opts.LogDir != "")
+	if err != nil {
+		return fmt.Errorf("creating session log: %w", err)
+	}
+	defer func() { _ = sessionLog.Close() }()
+	w = io.MultiWriter(w, sessionLog)
+	if opts.LogDir != "" {
+		fmt.Fprintf(w, "\n--- resumed at %s ---\n\n", time.Now().UTC().Format(time.RFC3339))
+	}
 	fmt.Fprintf(w, "Logs: %s\n\n", logDir)
 
 	skipVersions, err := buildSkipVersions(opts, ws, r)
@@ -511,4 +520,12 @@ func createLogDir(baseDir string) (string, error) {
 		return "", err
 	}
 	return dir, nil
+}
+
+func openSessionLog(logDir string, isResume bool) (*os.File, error) {
+	path := filepath.Join(logDir, "session.log")
+	if isResume {
+		return os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	}
+	return os.Create(path)
 }

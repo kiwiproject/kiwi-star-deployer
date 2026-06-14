@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1008,5 +1010,110 @@ func TestExecute_interactiveStepModeStopsBeforeCI(t *testing.T) {
 	// 3 (kiwi-parent) + 5 (POM update) = 8; git rev-parse and kiwi release never run
 	if fr.CallCount() != 8 {
 		t.Errorf("expected 8 runner calls, got %d", fr.CallCount())
+	}
+}
+
+func TestExecute_sessionLogCreated(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.5.0")
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	logBaseDir := t.TempDir()
+	if err := release.Execute(&bytes.Buffer{}, stages, ws, fr, logBaseDir, defaultOpts()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	entries, err := os.ReadDir(logBaseDir)
+	if err != nil {
+		t.Fatalf("reading logBaseDir: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 run directory, got %d", len(entries))
+	}
+	sessionLog := filepath.Join(logBaseDir, entries[0].Name(), "session.log")
+	if _, err := os.Stat(sessionLog); err != nil {
+		t.Errorf("expected session.log to exist: %v", err)
+	}
+}
+
+func TestExecute_sessionLogContainsNarrativeOutput(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.5.0")
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	logBaseDir := t.TempDir()
+	if err := release.Execute(&bytes.Buffer{}, stages, ws, fr, logBaseDir, defaultOpts()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	entries, err := os.ReadDir(logBaseDir)
+	if err != nil {
+		t.Fatalf("reading logBaseDir: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatalf("expected at least 1 run directory, got none")
+	}
+	data, err := os.ReadFile(filepath.Join(logBaseDir, entries[0].Name(), "session.log"))
+	if err != nil {
+		t.Fatalf("reading session.log: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "Stage 1:") {
+		t.Errorf("expected 'Stage 1:' in session.log:\n%s", content)
+	}
+	if !strings.Contains(content, "done") {
+		t.Errorf("expected 'done' in session.log:\n%s", content)
+	}
+}
+
+func TestExecute_sessionLogAppendsOnResume(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.5.0")
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	logDir := t.TempDir()
+	initial := "previous run output\n"
+	if err := os.WriteFile(filepath.Join(logDir, "session.log"), []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := defaultOpts()
+	opts.LogDir = logDir
+
+	if err := release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(logDir, "session.log"))
+	if err != nil {
+		t.Fatalf("reading session.log: %v", err)
+	}
+	content := string(data)
+	if !strings.HasPrefix(content, initial) {
+		t.Errorf("expected initial content preserved at start of session.log:\n%s", content)
+	}
+	if !strings.Contains(content, "--- resumed at") {
+		t.Errorf("expected resume separator in session.log:\n%s", content)
+	}
+	if !strings.Contains(content, "Stage 1:") {
+		t.Errorf("expected new content after separator in session.log:\n%s", content)
 	}
 }
