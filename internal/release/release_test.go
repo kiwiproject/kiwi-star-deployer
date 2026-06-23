@@ -1013,6 +1013,199 @@ func TestExecute_interactiveStepModeStopsBeforeCI(t *testing.T) {
 	}
 }
 
+func TestExecute_autoSkipUnchangedLibrary(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	// git log --oneline --no-decorate -2: both commits are maven-release-plugin commits
+	fr.AddResponse(&runner.Result{Stdout: "abc1234 [maven-release-plugin] prepare for next development iteration\ndef5678 [maven-release-plugin] prepare release v2.5.0\n"}, nil)
+	// git tag --points-at def5678: confirms the release commit is tagged
+	fr.AddResponse(&runner.Result{Stdout: "v2.5.0\n"}, nil)
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	opts := defaultOpts()
+	opts.SkipUnchanged = true
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// git log + git tag --points-at; mvn was never invoked.
+	if fr.CallCount() != 2 {
+		t.Errorf("expected 2 runner calls (git log, git tag), got %d", fr.CallCount())
+	}
+	out := buf.String()
+	if !strings.Contains(out, "skip") {
+		t.Errorf("expected 'skip' in output:\n%s", out)
+	}
+	if !strings.Contains(out, "kiwi") {
+		t.Errorf("expected library name in output:\n%s", out)
+	}
+	if !strings.Contains(out, "2.5.0") {
+		t.Errorf("expected detected version 2.5.0 in output:\n%s", out)
+	}
+}
+
+func TestExecute_autoSkipNotTriggeredWhenDisabled(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	// No git log call; library releases normally.
+	addLibraryResponses(fr, "v2.5.0")
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	// SkipUnchanged defaults to false — auto-skip disabled.
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), defaultOpts())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fr.CallCount() != 3 {
+		t.Errorf("expected 3 runner calls (git describe, mvn, changelog), got %d", fr.CallCount())
+	}
+	out := buf.String()
+	if !strings.Contains(out, "done") {
+		t.Errorf("expected 'done' in output (library should have released):\n%s", out)
+	}
+}
+
+func TestExecute_autoSkipNotTriggeredWhenChangesExist(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	// git log: most recent commit is NOT a maven-release-plugin commit.
+	fr.AddResponse(&runner.Result{Stdout: "abc1234 feat: add new feature\ndef5678 [maven-release-plugin] prepare release v2.5.0\n"}, nil)
+	addLibraryResponses(fr, "v2.5.0") // git describe, mvn, changelog
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	opts := defaultOpts()
+	opts.SkipUnchanged = true
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// git log + git describe + mvn + changelog = 4 calls
+	if fr.CallCount() != 4 {
+		t.Errorf("expected 4 runner calls (git log, git describe, mvn, changelog), got %d", fr.CallCount())
+	}
+	out := buf.String()
+	if !strings.Contains(out, "done") {
+		t.Errorf("expected 'done' in output (library should have released):\n%s", out)
+	}
+}
+
+func TestExecute_autoSkipVersionExtractedFromCommitMessage(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: "abc1234 [maven-release-plugin] prepare for next development iteration\ndef5678 [maven-release-plugin] prepare release v3.1.4\n"}, nil)
+	fr.AddResponse(&runner.Result{Stdout: "v3.1.4\n"}, nil) // git tag --points-at
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "3.1.5-SNAPSHOT", "")},
+	)
+
+	opts := defaultOpts()
+	opts.SkipUnchanged = true
+
+	var buf bytes.Buffer
+	if err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "3.1.4") {
+		t.Errorf("expected version 3.1.4 extracted from commit message, got:\n%s", buf.String())
+	}
+}
+
+func TestExecute_autoSkipNotTriggeredWhenNoTag(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	// Commit messages match but the release commit has no version tag.
+	fr.AddResponse(&runner.Result{Stdout: "abc1234 [maven-release-plugin] prepare for next development iteration\ndef5678 [maven-release-plugin] prepare release v2.5.0\n"}, nil)
+	fr.AddResponse(&runner.Result{Stdout: ""}, nil) // git tag --points-at: empty — no tag
+	addLibraryResponses(fr, "v2.5.0")               // library releases normally
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+	)
+
+	opts := defaultOpts()
+	opts.SkipUnchanged = true
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "skip") {
+		t.Errorf("library should not be skipped when release commit has no tag:\n%s", out)
+	}
+	if !strings.Contains(out, "done") {
+		t.Errorf("expected library to be released:\n%s", out)
+	}
+	// git log + git tag + git describe + mvn + changelog = 5
+	if fr.CallCount() != 5 {
+		t.Errorf("expected 5 runner calls, got %d", fr.CallCount())
+	}
+}
+
+func TestExecute_autoSkipOneOfTwoLibrariesInStage(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	// kiwi: unchanged — git log matches, tag confirmed
+	fr.AddResponse(&runner.Result{Stdout: "abc1234 [maven-release-plugin] prepare for next development iteration\ndef5678 [maven-release-plugin] prepare release v2.5.0\n"}, nil)
+	fr.AddResponse(&runner.Result{Stdout: "v2.5.0\n"}, nil) // git tag --points-at
+	// kiwi-test: has changes (first commit is not maven-release-plugin), releases normally
+	fr.AddResponse(&runner.Result{Stdout: "abc1234 feat: new tests\ndef5678 [maven-release-plugin] prepare release v3.0.0\n"}, nil)
+	addLibraryResponses(fr, "v3.0.0") // kiwi-test: git describe, mvn, changelog
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-test", Repo: "kiwiproject/kiwi-test", Stage: 1, VersionPlan: mustPlan("kiwi-test", "3.0.1-SNAPSHOT", "")},
+	)
+
+	opts := defaultOpts()
+	opts.SkipUnchanged = true
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "skip") || !strings.Contains(out, "kiwi") {
+		t.Errorf("expected kiwi to be skipped:\n%s", out)
+	}
+	if !strings.Contains(out, "done") || !strings.Contains(out, "kiwi-test") {
+		t.Errorf("expected kiwi-test to be released:\n%s", out)
+	}
+	// kiwi: git log + git tag (2); kiwi-test: git log + git describe + mvn + changelog (4) = 6
+	if fr.CallCount() != 6 {
+		t.Errorf("expected 6 runner calls, got %d", fr.CallCount())
+	}
+}
+
 func TestExecute_sessionLogCreated(t *testing.T) {
 	dir := t.TempDir()
 	ws := workspace.New(dir, &prepareSuccessRunner{})

@@ -65,6 +65,10 @@ type Options struct {
 	// Input is the reader used for interactive prompts. Set to os.Stdin in
 	// production; tests supply a strings.Reader with pre-programmed responses.
 	Input io.Reader
+	// SkipUnchanged automatically skips libraries whose last two commits are
+	// both maven-release-plugin commits, indicating nothing has changed since
+	// the most recent release.
+	SkipUnchanged bool
 }
 
 // errStopped is returned internally when the user declines to continue in
@@ -72,12 +76,13 @@ type Options struct {
 var errStopped = errors.New("stopped by user")
 
 type libraryResult struct {
-	name       string
-	version    string
-	logFile    string
-	output     string // captured stdout+stderr, printed to console on failure
-	failedStep string
-	err        error
+	name        string
+	version     string
+	logFile     string
+	output      string // captured stdout+stderr, printed to console on failure
+	failedStep  string
+	err         error
+	autoSkipped bool // true if skipped because no changes since last release
 }
 
 // Execute runs all release stages in order. Libraries within a stage are
@@ -138,8 +143,9 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 		}
 
 		var failed bool
+		var results []libraryResult
 		if len(toRelease) > 0 {
-			results := releaseStage(toRelease, ws, r, logDir, opts)
+			results = releaseStage(toRelease, ws, r, logDir, opts)
 			for _, res := range results {
 				if res.err != nil {
 					fmt.Fprintf(w, "  FAILED  %s\n", res.name)
@@ -147,6 +153,8 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 					fmt.Fprintf(w, "%s\n", res.output)
 					_ = opts.StateWriter.RecordFailed(res.name, res.failedStep, res.err.Error())
 					failed = true
+				} else if res.autoSkipped {
+					fmt.Fprintf(w, "  skip    %s  (no changes since %s)\n", res.name, res.version)
 				} else {
 					fmt.Fprintf(w, "  done    %s  (log: %s)\n", res.name, res.logFile)
 					totalReleased++
@@ -159,7 +167,16 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 		}
 
 		if i < len(stages)-1 {
-			effectiveStage := append(toSkip, toRelease...)
+			// Build effectiveStage for downstream POM updates. Auto-skipped
+			// entries use the detected released version, not the planned one.
+			effectiveStage := make([]plan.Entry, 0, len(toSkip)+len(toRelease))
+			effectiveStage = append(effectiveStage, toSkip...)
+			for idx, e := range toRelease {
+				if results[idx].autoSkipped && results[idx].version != "" {
+					e.VersionPlan.ReleaseVersion = results[idx].version
+				}
+				effectiveStage = append(effectiveStage, e)
+			}
 			if err := updateDownstreamPOMs(w, effectiveStage, stages[i+1:], ws, r, logDir, opts); err != nil {
 				if errors.Is(err, errStopped) {
 					fmt.Fprintf(w, "Stopped. Run with --resume to continue later.\n")
@@ -413,6 +430,20 @@ func releaseStage(entries []plan.Entry, ws *workspace.Workspace, r runner.Runner
 func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, logDir string, opts Options) libraryResult {
 	logFile := filepath.Join(logDir, entry.Name+".log")
 
+	if err := ws.Prepare(entry.Name); err != nil {
+		return libraryResult{name: entry.Name, logFile: logFile, failedStep: state.StepMavenRelease, err: fmt.Errorf("preparing workspace: %w", err)}
+	}
+
+	if opts.SkipUnchanged {
+		changed, lastVersion, err := hasChangesSinceLastRelease(ws, r, entry.Name)
+		if err != nil {
+			return libraryResult{name: entry.Name, logFile: logFile, failedStep: state.StepMavenRelease, err: fmt.Errorf("checking for changes: %w", err)}
+		}
+		if !changed {
+			return libraryResult{name: entry.Name, version: lastVersion, autoSkipped: true}
+		}
+	}
+
 	f, err := os.Create(logFile)
 	if err != nil {
 		return libraryResult{name: entry.Name, logFile: logFile, err: fmt.Errorf("creating log file: %w", err)}
@@ -421,10 +452,6 @@ func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, 
 
 	var buf bytes.Buffer
 	out := io.MultiWriter(f, &buf)
-
-	if err := ws.Prepare(entry.Name); err != nil {
-		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepMavenRelease, err: fmt.Errorf("preparing workspace: %w", err)}
-	}
 
 	repoDir := ws.RepoDir(entry.Name)
 	vp := entry.VersionPlan
@@ -528,4 +555,67 @@ func openSessionLog(logDir string, isResume bool) (*os.File, error) {
 		return os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	}
 	return os.Create(path)
+}
+
+// hasChangesSinceLastRelease returns false (no changes) when the two most
+// recent commits are both maven-release-plugin commits AND the "prepare
+// release" commit carries a version tag, indicating nothing was committed
+// since the last release. It also returns the version from that commit so
+// the caller can record it. A git error, fewer than 2 commits, or a missing
+// tag causes it to return true (has changes) so the library releases normally.
+func hasChangesSinceLastRelease(ws *workspace.Workspace, r runner.Runner, name string) (changed bool, lastVersion string, err error) {
+	result, err := r.Run(runner.Options{
+		Command:    "git",
+		Args:       []string{"log", "--oneline", "--no-decorate", "-2"},
+		WorkingDir: ws.RepoDir(name),
+	})
+	if err != nil {
+		return true, "", fmt.Errorf("git log: %w", err)
+	}
+	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+	if len(lines) < 2 {
+		return true, "", nil
+	}
+	msg0 := gitCommitMessage(lines[0])
+	msg1 := gitCommitMessage(lines[1])
+	if !strings.HasPrefix(msg0, "[maven-release-plugin]") ||
+		!strings.HasPrefix(msg1, "[maven-release-plugin]") ||
+		!strings.Contains(msg1, "prepare release") {
+		return true, "", nil
+	}
+	// Confirm the release commit carries a tag that matches the version in the
+	// commit message — guards against crafted messages, partial releases that
+	// left no tag, and any mismatch between the two.
+	version := extractReleaseVersion(msg1)
+	sha, _, _ := strings.Cut(lines[1], " ")
+	tagResult, err := r.Run(runner.Options{
+		Command:    "git",
+		Args:       []string{"tag", "--points-at", sha},
+		WorkingDir: ws.RepoDir(name),
+	})
+	if err != nil || !containsExactTag(tagResult.Stdout, "v"+version) {
+		return true, "", nil
+	}
+	return false, version, nil
+}
+
+// containsExactTag reports whether output (from "git tag --points-at")
+// contains a line that is exactly the given tag name.
+func containsExactTag(output, tag string) bool {
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if strings.TrimSpace(line) == tag {
+			return true
+		}
+	}
+	return false
+}
+
+func gitCommitMessage(logLine string) string {
+	_, msg, _ := strings.Cut(logLine, " ")
+	return msg
+}
+
+func extractReleaseVersion(msg string) string {
+	const prefix = "[maven-release-plugin] prepare release "
+	return strings.TrimPrefix(strings.TrimPrefix(msg, prefix), "v")
 }

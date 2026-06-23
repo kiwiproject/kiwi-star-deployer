@@ -32,6 +32,7 @@ var (
 	summaryFlags     []string
 	summaryFileFlags []string
 	interactive      string
+	noAutoSkip       bool
 )
 
 func runRelease(_ *cobra.Command, _ []string) error {
@@ -155,6 +156,7 @@ func runRelease(_ *cobra.Command, _ []string) error {
 		ChangelogSummaryFiles: summaryFiles,
 		Interactive:           interactive,
 		Input:                 os.Stdin,
+		SkipUnchanged:         !noAutoSkip,
 	}
 	if *cfg.Settings.CIVerify {
 		opts.CIChecker = &ci.GHChecker{Runner: r}
@@ -195,6 +197,7 @@ func init() {
 	releaseCmd.Flags().StringArrayVar(&summaryFileFlags, "summary-file", nil, "prepend summary file to changelog for a library (libname=/path, repeatable)")
 	releaseCmd.Flags().StringVar(&interactive, "interactive", "", "pause for confirmation between stages (default) or sub-steps (--interactive=step)")
 	releaseCmd.Flag("interactive").NoOptDefVal = "stage"
+	releaseCmd.Flags().BoolVar(&noAutoSkip, "no-auto-skip", false, "release all libraries even if unchanged since last release")
 }
 
 func parseSummaryFlags(flags []string, libs map[string]config.Library) (map[string]string, error) {
