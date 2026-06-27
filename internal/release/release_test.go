@@ -1180,9 +1180,11 @@ func TestExecute_autoSkipOneOfTwoLibrariesInStage(t *testing.T) {
 	fr.AddResponse(&runner.Result{Stdout: "abc1234 feat: new tests\ndef5678 [maven-release-plugin] prepare release v3.0.0\n"}, nil)
 	addLibraryResponses(fr, "v3.0.0") // kiwi-test: git describe, mvn, changelog
 
+	// kiwi in stage 1, kiwi-test in stage 2: stages run sequentially so the
+	// FakeRunner's ordered response queue is consumed in a deterministic order.
 	stages := makeStages(
 		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi-test", Repo: "kiwiproject/kiwi-test", Stage: 1, VersionPlan: mustPlan("kiwi-test", "3.0.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-test", Repo: "kiwiproject/kiwi-test", Stage: 2, VersionPlan: mustPlan("kiwi-test", "3.0.1-SNAPSHOT", "")},
 	)
 
 	opts := defaultOpts()
