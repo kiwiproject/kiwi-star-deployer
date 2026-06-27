@@ -23,7 +23,7 @@ build:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
 
 install: build
-	@test -d "$(INSTALL_DIR)" || { echo "Error: INSTALL_DIR '$(INSTALL_DIR)' does not exist"; exit 1; }
+	@mkdir -p "$(INSTALL_DIR)"
 	cp $(BINARY) $(INSTALL_DIR)/$(BINARY)
 	@echo "Installed $(BINARY) to $(INSTALL_DIR)"
 
