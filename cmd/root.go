@@ -11,8 +11,9 @@ var version = "dev"
 var configPath string
 
 var rootCmd = &cobra.Command{
-	Use:   "kiwi-star-deployer",
-	Short: "Automates kiwiproject library releases in dependency order",
+	Use:          "kiwi-star-deployer",
+	Short:        "Automates kiwiproject library releases in dependency order",
+	SilenceUsage: true,
 }
 
 func Execute() {
