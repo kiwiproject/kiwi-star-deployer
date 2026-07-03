@@ -63,6 +63,12 @@ func (d *Duration) UnmarshalText(text []byte) error {
 }
 
 func Load(path string) (*Config, error) {
+	expanded, err := expandHome(path)
+	if err != nil {
+		return nil, fmt.Errorf("expanding config path %q: %w", path, err)
+	}
+	path = expanded
+
 	var cfg Config
 	if _, err := toml.DecodeFile(path, &cfg); err != nil {
 		return nil, fmt.Errorf("loading config %s: %w", path, err)
