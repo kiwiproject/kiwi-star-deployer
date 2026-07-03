@@ -122,6 +122,28 @@ func TestLoad_appliesDefaultChangelogScript(t *testing.T) {
 	}
 }
 
+func TestLoad_expandsTildeInChangelogScript(t *testing.T) {
+	path := writeTempTOML(t, `
+[library.kiwi]
+repo = "kiwiproject/kiwi"
+
+[settings]
+changelog_script = "~/scripts/.generate-kiwi-changelog"
+`)
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, "scripts/.generate-kiwi-changelog")
+	if cfg.Settings.ChangelogScript != want {
+		t.Errorf("changelog_script: got %q, want %q", cfg.Settings.ChangelogScript, want)
+	}
+}
+
 func TestLoad_defaultsCIVerifyToTrue(t *testing.T) {
 	cfg, err := config.Load("testdata/minimal.toml")
 	if err != nil {

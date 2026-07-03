@@ -123,6 +123,12 @@ func expandPaths(cfg *Config) error {
 		return fmt.Errorf("expanding state_path %q: %w", cfg.Settings.StatePath, err)
 	}
 	cfg.Settings.StatePath = expanded
+
+	expanded, err = expandHome(cfg.Settings.ChangelogScript)
+	if err != nil {
+		return fmt.Errorf("expanding changelog_script %q: %w", cfg.Settings.ChangelogScript, err)
+	}
+	cfg.Settings.ChangelogScript = expanded
 	return nil
 }
 
