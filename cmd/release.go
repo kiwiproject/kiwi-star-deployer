@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kiwiproject/kiwi-star-deployer/internal/checkversions"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/ci"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/config"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/mavencentral"
@@ -80,6 +81,12 @@ func runRelease(_ *cobra.Command, _ []string) error {
 		preflight.Print(os.Stdout, results)
 		if !preflight.AllPassed(results) {
 			return fmt.Errorf("preflight failed; fix the issues above before releasing")
+		}
+
+		cvResults := checkversions.RunAll(r, cfg.Libraries)
+		checkversions.Print(os.Stdout, cvResults)
+		if !checkversions.AllPassed(cvResults) {
+			return fmt.Errorf("version check failed; fix the mismatches above before releasing")
 		}
 	}
 

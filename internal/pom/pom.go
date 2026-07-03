@@ -79,6 +79,13 @@ func readPropertyChildren(dec *xml.Decoder, props map[string]string) error {
 	}
 }
 
+// ParseVersion reads the project version from any XML source. It returns an
+// error if the XML is malformed, no <version> element exists as a direct child
+// of <project>, or the version is not a SNAPSHOT.
+func ParseVersion(r io.Reader) (string, error) {
+	return parseVersion(xml.NewDecoder(r))
+}
+
 // ReadVersion reads the current version from the pom.xml at path. It returns
 // an error if the file cannot be read, the XML is malformed, no <version>
 // element exists as a direct child of <project>, or the version is not a
@@ -90,7 +97,7 @@ func ReadVersion(path string) (string, error) {
 	}
 	defer func() { _ = f.Close() }()
 
-	version, err := parseVersion(xml.NewDecoder(f))
+	version, err := ParseVersion(f)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", path, err)
 	}
