@@ -17,16 +17,24 @@ var rootCmd = &cobra.Command{
 	Short:        "Automates kiwiproject library releases in dependency order",
 	SilenceUsage: true,
 	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-		if configPath != "" {
-			return nil
-		}
-		if v := os.Getenv(configEnvVar); v != "" {
-			configPath = v
-			return nil
-		}
-		configPath = "kiwi-star-deployer.toml"
+		configPath = resolveConfigPath(
+			cmd.Root().PersistentFlags().Changed("config"),
+			configPath,
+		)
 		return nil
 	},
+}
+
+// resolveConfigPath returns the effective config path using the priority:
+// --config flag > KIWI_STAR_DEPLOYER_CONFIG env var > defaultPath.
+func resolveConfigPath(flagChanged bool, defaultPath string) string {
+	if flagChanged {
+		return defaultPath
+	}
+	if v := os.Getenv(configEnvVar); v != "" {
+		return v
+	}
+	return defaultPath
 }
 
 func Execute() {
@@ -36,6 +44,7 @@ func Execute() {
 }
 
 func init() {
+	cobra.EnableTraverseRunHooks = true
 	rootCmd.Version = version
-	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "path to config file (overrides $"+configEnvVar+")")
+	rootCmd.PersistentFlags().StringVar(&configPath, "config", "kiwi-star-deployer.toml", "path to config file (overrides $"+configEnvVar+")")
 }
