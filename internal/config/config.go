@@ -65,8 +65,16 @@ func Load(path string) (*Config, error) {
 	path = expanded
 
 	var cfg Config
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+	md, err := toml.DecodeFile(path, &cfg)
+	if err != nil {
 		return nil, fmt.Errorf("loading config %s: %w", path, err)
+	}
+	if keys := md.Undecoded(); len(keys) > 0 {
+		names := make([]string, len(keys))
+		for i, k := range keys {
+			names[i] = strings.Join(k, ".")
+		}
+		return nil, fmt.Errorf("config contains unrecognized keys: %s", strings.Join(names, ", "))
 	}
 	applyDefaults(&cfg)
 	if err := expandPaths(&cfg); err != nil {

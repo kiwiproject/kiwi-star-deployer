@@ -35,8 +35,8 @@ func TestCompute_tableVariants(t *testing.T) {
 	}{
 		{"patch bump", "1.2.3-SNAPSHOT", "1.2.3", "1.2.4-SNAPSHOT"},
 		{"patch zero", "3.0.0-SNAPSHOT", "3.0.0", "3.0.1-SNAPSHOT"},
-		{"minor bump", "1.1.0-SNAPSHOT", "1.1.0", "1.1.1-SNAPSHOT"},
-		{"major bump", "1.0.0-SNAPSHOT", "1.0.0", "1.0.1-SNAPSHOT"},
+		{"minor version", "1.1.0-SNAPSHOT", "1.1.0", "1.1.1-SNAPSHOT"},
+		{"major version", "1.0.0-SNAPSHOT", "1.0.0", "1.0.1-SNAPSHOT"},
 	}
 
 	for _, tt := range tests {

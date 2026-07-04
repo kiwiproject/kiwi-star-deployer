@@ -173,6 +173,22 @@ ci_verify = false
 	}
 }
 
+func TestLoad_unrecognizedKeyIsError(t *testing.T) {
+	_, err := config.Load(writeTempTOML(t, `
+[library.kiwi]
+repo = "kiwiproject/kiwi"
+
+[release.overrides]
+kiwi = "1.0.0"
+`))
+	if err == nil {
+		t.Fatal("expected error for unrecognized key, got nil")
+	}
+	if !strings.Contains(err.Error(), "unrecognized") {
+		t.Errorf("expected 'unrecognized' in error, got: %v", err)
+	}
+}
+
 func TestLoad_fileNotFound(t *testing.T) {
 	_, err := config.Load("testdata/nonexistent.toml")
 	if err == nil {
