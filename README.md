@@ -84,6 +84,10 @@ group_id = "org.kiwiproject"
 # Default: .generate-kiwi-changelog
 changelog_script = ".generate-kiwi-changelog"
 
+# Per-library timeout for mvn release:prepare release:perform.
+# Default: 1h
+maven_release_timeout = "1h"
+
 # How long to wait for a released artifact to appear in Maven Central.
 # Default: 1h
 maven_central_max_wait = "1h"
@@ -138,6 +142,7 @@ depends_on = ["kiwi-parent", "kiwi-bom", "kiwi"]
 | `state_path` | string | `~/.kiwi-star-deployer/state.json` | Release run state file |
 | `group_id` | string | `org.kiwiproject` | Maven groupId |
 | `changelog_script` | string | `.generate-kiwi-changelog` | Changelog script name or path |
+| `maven_release_timeout` | duration | `1h` | Per-library timeout for mvn release:prepare release:perform |
 | `maven_central_max_wait` | duration | `1h` | Max wait for Maven Central publication |
 | `maven_central_poll_interval` | duration | `30s` | Poll interval for Maven Central |
 | `ci_verify` | bool | `true` | Verify CI after each POM update push |
