@@ -54,9 +54,6 @@ func TestLoad_parsesValidConfig(t *testing.T) {
 		t.Errorf("kiwi-bom depends_on: got %v, want [kiwi-parent]", bom.DependsOn)
 	}
 
-	if version, ok := cfg.Release.Overrides["kiwi"]; !ok || version != "3.0.0" {
-		t.Errorf("release override for kiwi: got %q, want 3.0.0", version)
-	}
 }
 
 func TestLoad_appliesDefaultWorkspace(t *testing.T) {
@@ -219,39 +216,6 @@ repo = "kiwiproject/other-bom"
 type = "library-bom"
 `,
 			wantErr: `at most one library may have type "library-bom"`,
-		},
-		{
-			name: "invalid override version",
-			content: `
-[library.kiwi]
-repo = "kiwiproject/kiwi"
-
-[release.overrides]
-kiwi = "not-a-version"
-`,
-			wantErr: "not a valid version",
-		},
-		{
-			name: "override version with leading zero",
-			content: `
-[library.kiwi]
-repo = "kiwiproject/kiwi"
-
-[release.overrides]
-kiwi = "01.2.3"
-`,
-			wantErr: "not a valid version",
-		},
-		{
-			name: "override for unknown library",
-			content: `
-[library.kiwi]
-repo = "kiwiproject/kiwi"
-
-[release.overrides]
-nonexistent = "1.0.0"
-`,
-			wantErr: `release override for unknown library "nonexistent"`,
 		},
 		{
 			name: "missing repo",

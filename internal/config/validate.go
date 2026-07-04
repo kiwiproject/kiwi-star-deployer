@@ -2,11 +2,8 @@ package config
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 )
-
-var semverRe = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
 
 var validTypes = map[string]bool{
 	"":             true,
@@ -42,15 +39,6 @@ func validate(cfg *Config) error {
 
 	if libraryBOMCount > 1 {
 		errs = append(errs, fmt.Sprintf("at most one library may have type %q, found %d", TypeLibraryBOM, libraryBOMCount))
-	}
-
-	for name, version := range cfg.Release.Overrides {
-		if _, ok := cfg.Libraries[name]; !ok {
-			errs = append(errs, fmt.Sprintf("release override for unknown library %q", name))
-		}
-		if !semverRe.MatchString(version) {
-			errs = append(errs, fmt.Sprintf("release override for %q: %q is not a valid version (expected X.Y.Z)", name, version))
-		}
 	}
 
 	if cfg.Settings.CIVerify != nil && *cfg.Settings.CIVerify {

@@ -193,7 +193,7 @@ func TestParseSummaryFileFlags(t *testing.T) {
 }
 
 func mustPlanEntry(name string) plan.Entry {
-	vp, err := ver.Compute(name, "1.0.0-SNAPSHOT", "")
+	vp, err := ver.Compute(name, "1.0.0-SNAPSHOT")
 	if err != nil {
 		panic(err)
 	}

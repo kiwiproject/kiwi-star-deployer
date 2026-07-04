@@ -19,7 +19,6 @@ const (
 type Config struct {
 	Settings  Settings           `toml:"settings"`
 	Libraries map[string]Library `toml:"library"`
-	Release   ReleaseConfig      `toml:"release"`
 }
 
 type Settings struct {
@@ -44,10 +43,6 @@ type Library struct {
 	Repo      string   `toml:"repo"`
 	Type      string   `toml:"type"`
 	DependsOn []string `toml:"depends_on"`
-}
-
-type ReleaseConfig struct {
-	Overrides map[string]string `toml:"overrides"`
 }
 
 // Duration is a time.Duration that deserializes from a TOML string (e.g. "30s", "1h").

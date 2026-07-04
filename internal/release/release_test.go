@@ -53,8 +53,8 @@ func defaultOpts() release.Options {
 	}
 }
 
-func mustPlan(name, pomVersion, override string) version.Plan {
-	vp, err := version.Compute(name, pomVersion, override)
+func mustPlan(name, pomVersion string) version.Plan {
+	vp, err := version.Compute(name, pomVersion)
 	if err != nil {
 		panic(err)
 	}
@@ -99,7 +99,7 @@ func TestExecute_singleLibrarySuccess(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0")
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	var buf bytes.Buffer
@@ -127,7 +127,7 @@ func TestExecute_completionMessageSingular(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0")
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	var buf bytes.Buffer
@@ -148,8 +148,8 @@ func TestExecute_completionMessagePlural(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0")
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	var buf bytes.Buffer
@@ -170,8 +170,8 @@ func TestExecute_multipleStages(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0")
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	var buf bytes.Buffer
@@ -197,8 +197,8 @@ func TestExecute_parallelWithinStage(t *testing.T) {
 	addLibraryResponses(fr, "v2.9.0")
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi-test", Repo: "kiwiproject/kiwi-test", Stage: 1, VersionPlan: mustPlan("kiwi-test", "3.0.0-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+		plan.Entry{Name: "kiwi-test", Repo: "kiwiproject/kiwi-test", Stage: 1, VersionPlan: mustPlan("kiwi-test", "3.0.0-SNAPSHOT")},
 	)
 
 	var buf bytes.Buffer
@@ -220,7 +220,7 @@ func TestExecute_mvnFailureHalts(t *testing.T) {
 	fr.AddResponse(nil, errors.New("exit status 1"))      // mvn fails
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	var buf bytes.Buffer
@@ -244,8 +244,8 @@ func TestExecute_stageFailureHaltsBeforeNextStage(t *testing.T) {
 	// stage 2 should never run
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	var buf bytes.Buffer
@@ -275,7 +275,7 @@ func TestExecute_centralCheckFailureHalts(t *testing.T) {
 	}
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	var buf bytes.Buffer
@@ -299,7 +299,7 @@ func TestExecute_changelogFailureHalts(t *testing.T) {
 	fr.AddResponse(nil, errors.New("exit status 1"))      // changelog fails
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	var buf bytes.Buffer
@@ -323,8 +323,8 @@ func TestExecute_updatesDownstreamPOMs(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0") // kiwi release
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	var buf bytes.Buffer
@@ -352,8 +352,8 @@ func TestExecute_updatesLibraryBOMPOMs(t *testing.T) {
 	addLibraryResponses(fr, "v1.0.0") // kiwi-libraries-bom release
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi-libraries-bom", Repo: "kiwiproject/kiwi-libraries-bom", Stage: 2, Type: "library-bom", DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi-libraries-bom", "2.0.0-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi-libraries-bom", Repo: "kiwiproject/kiwi-libraries-bom", Stage: 2, Type: "library-bom", DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi-libraries-bom", "2.0.0-SNAPSHOT")},
 	)
 
 	var buf bytes.Buffer
@@ -381,8 +381,8 @@ func TestExecute_nonParentPOMDepUsesSetProperty(t *testing.T) {
 	addLibraryResponses(fr, "v3.0.0") // kiwi-test release
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi-test", Repo: "kiwiproject/kiwi-test", Stage: 2, DependsOn: []string{"kiwi"}, VersionPlan: mustPlan("kiwi-test", "3.0.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+		plan.Entry{Name: "kiwi-test", Repo: "kiwiproject/kiwi-test", Stage: 2, DependsOn: []string{"kiwi"}, VersionPlan: mustPlan("kiwi-test", "3.0.1-SNAPSHOT")},
 	)
 
 	release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), defaultOpts()) //nolint:errcheck
@@ -419,8 +419,8 @@ func TestExecute_pomUpdateFailureHalts(t *testing.T) {
 	fr.AddResponse(nil, errors.New("exit status 1"))     // mvn versions fails
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	var buf bytes.Buffer
@@ -443,8 +443,8 @@ func TestExecute_verifyPOMUpdateArgs(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0") // kiwi release
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Type: "parent-pom", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Type: "parent-pom", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), defaultOpts()) //nolint:errcheck
@@ -488,7 +488,7 @@ func TestExecute_verifyMvnArgs(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0")
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), defaultOpts()) //nolint:errcheck
@@ -522,7 +522,7 @@ func TestExecute_mavenTimeoutPassedToRunner(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0")
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	opts := defaultOpts()
@@ -546,8 +546,8 @@ func TestExecute_completedLibraryIsSkipped(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0") // kiwi: git describe, mvn, changelog
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	opts := defaultOpts()
@@ -584,8 +584,8 @@ func TestExecute_skipResolvesVersionFromGitTag(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0") // kiwi: git describe, mvn, changelog
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	opts := defaultOpts()
@@ -619,8 +619,8 @@ func TestExecute_skippedVersionUsedInPOMUpdate(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0") // kiwi: git describe, mvn, changelog
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Type: "parent-pom", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Type: "parent-pom", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	opts := defaultOpts()
@@ -649,8 +649,8 @@ func TestExecute_ciVerificationPassesAfterPOMUpdate(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0")                      // kiwi: git describe, mvn, changelog
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	opts := defaultOpts()
@@ -687,8 +687,8 @@ func TestExecute_ciVerificationFailureHalts(t *testing.T) {
 	// kiwi release should NOT run after CI failure
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	opts := defaultOpts()
@@ -718,7 +718,7 @@ func TestExecute_changelogSummaryPassedToScript(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0")
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	opts := defaultOpts()
@@ -741,7 +741,7 @@ func TestExecute_changelogSummaryFilePassedToScript(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0")
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	opts := defaultOpts()
@@ -764,7 +764,7 @@ func TestExecute_changelogSummaryNotPassedForOtherLibrary(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0")
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	opts := defaultOpts()
@@ -787,7 +787,7 @@ func TestExecute_verifyChangelogArgs(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0")
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), defaultOpts()) //nolint:errcheck
@@ -824,8 +824,8 @@ func TestExecute_pomUpdateSkippedWhenAlreadyUpToDate(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0") // kiwi release
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	var buf bytes.Buffer
@@ -848,8 +848,8 @@ func TestExecute_interactiveStageModeContinues(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0") // kiwi (stage 2)
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	opts := defaultOpts()
@@ -880,8 +880,8 @@ func TestExecute_interactiveStageModeStops(t *testing.T) {
 	// kiwi (stage 2) should never run
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	opts := defaultOpts()
@@ -914,8 +914,8 @@ func TestExecute_interactiveStepModePromptsBeforeAndAfterCI(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0")                      // kiwi release
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	opts := defaultOpts()
@@ -951,8 +951,8 @@ func TestExecute_interactiveStepModeStopsAfterCI(t *testing.T) {
 	// kiwi release should NOT run
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	opts := defaultOpts()
@@ -987,8 +987,8 @@ func TestExecute_interactiveStepModeStopsBeforeCI(t *testing.T) {
 	// git rev-parse and kiwi release should NOT run
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	opts := defaultOpts()
@@ -1024,7 +1024,7 @@ func TestExecute_autoSkipUnchangedLibrary(t *testing.T) {
 	fr.AddResponse(&runner.Result{Stdout: "v2.5.0\n"}, nil)
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	opts := defaultOpts()
@@ -1060,7 +1060,7 @@ func TestExecute_autoSkipNotTriggeredWhenDisabled(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0")
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	// SkipUnchanged defaults to false — auto-skip disabled.
@@ -1088,7 +1088,7 @@ func TestExecute_autoSkipNotTriggeredWhenChangesExist(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0") // git describe, mvn, changelog
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	opts := defaultOpts()
@@ -1118,7 +1118,7 @@ func TestExecute_autoSkipVersionExtractedFromCommitMessage(t *testing.T) {
 	fr.AddResponse(&runner.Result{Stdout: "v3.1.4\n"}, nil) // git tag --points-at
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "3.1.5-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "3.1.5-SNAPSHOT")},
 	)
 
 	opts := defaultOpts()
@@ -1144,7 +1144,7 @@ func TestExecute_autoSkipNotTriggeredWhenNoTag(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0")               // library releases normally
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	opts := defaultOpts()
@@ -1183,8 +1183,8 @@ func TestExecute_autoSkipOneOfTwoLibrariesInStage(t *testing.T) {
 	// kiwi in stage 1, kiwi-test in stage 2: stages run sequentially so the
 	// FakeRunner's ordered response queue is consumed in a deterministic order.
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
-		plan.Entry{Name: "kiwi-test", Repo: "kiwiproject/kiwi-test", Stage: 2, VersionPlan: mustPlan("kiwi-test", "3.0.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+		plan.Entry{Name: "kiwi-test", Repo: "kiwiproject/kiwi-test", Stage: 2, VersionPlan: mustPlan("kiwi-test", "3.0.1-SNAPSHOT")},
 	)
 
 	opts := defaultOpts()
@@ -1216,7 +1216,7 @@ func TestExecute_sessionLogCreated(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0")
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	logBaseDir := t.TempDir()
@@ -1245,7 +1245,7 @@ func TestExecute_sessionLogContainsNarrativeOutput(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0")
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	logBaseDir := t.TempDir()
@@ -1281,7 +1281,7 @@ func TestExecute_sessionLogAppendsOnResume(t *testing.T) {
 	addLibraryResponses(fr, "v2.5.0")
 
 	stages := makeStages(
-		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT", "")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
 	logDir := t.TempDir()

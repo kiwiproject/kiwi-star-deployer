@@ -49,7 +49,7 @@ func Build(cfg *config.Config, ws *workspace.Workspace) ([][]Entry, error) {
 			if err != nil {
 				return nil, err
 			}
-			vp, err := version.Compute(name, pomVersion, cfg.Release.Overrides[name])
+			vp, err := version.Compute(name, pomVersion)
 			if err != nil {
 				return nil, err
 			}
@@ -114,16 +114,11 @@ func Print(w io.Writer, stages [][]Entry) {
 				label = fmt.Sprintf("Stage %d:", i+1)
 			}
 			vp := entry.VersionPlan
-			override := ""
-			if vp.OverrideApplied {
-				override = " [OVERRIDE]"
-			}
-			fmt.Fprintf(tw, "%s\t%s\t%s -> %s%s\t(next: %s)\n",
+			fmt.Fprintf(tw, "%s\t%s\t%s -> %s\t(next: %s)\n",
 				label,
 				entry.Name,
 				vp.CurrentVersion,
 				vp.ReleaseVersion,
-				override,
 				vp.NextDevVersion,
 			)
 		}

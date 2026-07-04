@@ -171,33 +171,6 @@ func TestBuild_populatesTypeAndDependsOn(t *testing.T) {
 	}
 }
 
-func TestBuild_appliesOverride(t *testing.T) {
-	dir, ws := makeWorkspace(t)
-	createRepo(t, dir, "kiwi", "2.5.1-SNAPSHOT")
-
-	cfg := &config.Config{
-		Settings:  config.Settings{Workspace: dir},
-		Libraries: map[string]config.Library{
-			"kiwi": {Repo: "kiwiproject/kiwi"},
-		},
-		Release: config.ReleaseConfig{
-			Overrides: map[string]string{"kiwi": "3.0.0"},
-		},
-	}
-
-	stages, err := plan.Build(cfg, ws)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	entry := stages[0][0]
-	if entry.VersionPlan.ReleaseVersion != "3.0.0" {
-		t.Errorf("release: got %q, want 3.0.0", entry.VersionPlan.ReleaseVersion)
-	}
-	if !entry.VersionPlan.OverrideApplied {
-		t.Error("OverrideApplied: got false, want true")
-	}
-}
-
 func TestBuild_validationPassesWhenPropertiesPresent(t *testing.T) {
 	dir, ws := makeWorkspace(t)
 	createRepo(t, dir, "kiwi-parent", "3.0.0-SNAPSHOT")
@@ -299,10 +272,10 @@ func TestBuild_validationSkipsParentPOMDeps(t *testing.T) {
 
 func TestPrint_basicOutput(t *testing.T) {
 	stages := [][]plan.Entry{
-		{{Name: "kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT", "")}},
+		{{Name: "kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")}},
 		{
-			{Name: "kiwi-bom", Stage: 2, VersionPlan: mustPlan("kiwi-bom", "2.0.0-SNAPSHOT", "")},
-			{Name: "kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "4.0.0-SNAPSHOT", "5.0.0")},
+			{Name: "kiwi-bom", Stage: 2, VersionPlan: mustPlan("kiwi-bom", "2.0.0-SNAPSHOT")},
+			{Name: "kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "4.0.0-SNAPSHOT")},
 		},
 	}
 
@@ -315,9 +288,6 @@ func TestPrint_basicOutput(t *testing.T) {
 	}
 	if !strings.Contains(out, "Stage 2:") {
 		t.Errorf("expected 'Stage 2:' in output:\n%s", out)
-	}
-	if !strings.Contains(out, "[OVERRIDE]") {
-		t.Errorf("expected '[OVERRIDE]' in output:\n%s", out)
 	}
 	if !strings.Contains(out, "3.0.0-SNAPSHOT -> 3.0.0") {
 		t.Errorf("expected version arrow in output:\n%s", out)
@@ -344,8 +314,8 @@ func TestPrint_emptyPlan(t *testing.T) {
 }
 
 // mustPlan is a test helper that calls version.Compute and panics on error.
-func mustPlan(name, pomVersion, override string) version.Plan {
-	vp, err := version.Compute(name, pomVersion, override)
+func mustPlan(name, pomVersion string) version.Plan {
+	vp, err := version.Compute(name, pomVersion)
 	if err != nil {
 		panic(err)
 	}

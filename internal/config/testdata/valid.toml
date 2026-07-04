@@ -24,5 +24,3 @@ repo = "kiwiproject/kiwi-libraries-bom"
 type = "library-bom"
 depends_on = ["kiwi"]
 
-[release.overrides]
-kiwi = "3.0.0"
