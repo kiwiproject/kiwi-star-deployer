@@ -58,8 +58,11 @@ make help     # list all targets
 
 ## Configuration
 
-The tool reads a TOML config file. By default it looks for `kiwi-star-deployer.toml`
-in the current directory; use `--config <path>` to specify a different location.
+The tool reads a TOML config file. The config path is resolved in this order:
+
+1. `--config <path>` flag
+2. `KIWI_STAR_DEPLOYER_CONFIG` environment variable
+3. `kiwi-star-deployer.toml` in the current directory (default)
 
 ### Full annotated example
 
@@ -230,7 +233,7 @@ categories:
 
 ## Commands
 
-All commands accept a `--config <path>` flag (default: `kiwi-star-deployer.toml`).
+All commands accept a `--config <path>` flag. The config path can also be set via the `KIWI_STAR_DEPLOYER_CONFIG` environment variable. If neither is provided, `kiwi-star-deployer.toml` in the current directory is used.
 
 ### release
 
