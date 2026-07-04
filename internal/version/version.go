@@ -65,12 +65,3 @@ func parseXYZ(v string) ([3]int, error) {
 	return nums, nil
 }
 
-// lessVersion reports whether a is strictly less than b.
-func lessVersion(a, b [3]int) bool {
-	for i := range a {
-		if a[i] != b[i] {
-			return a[i] < b[i]
-		}
-	}
-	return false
-}

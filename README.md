@@ -125,14 +125,6 @@ depends_on = ["kiwi-parent", "kiwi-bom"]
 repo = "kiwiproject/kiwi-libraries-bom"
 type = "library-bom"               # at most one library may have this type
 depends_on = ["kiwi-parent", "kiwi-bom", "kiwi"]
-
-
-# Version overrides force a specific release version regardless of what is in the POM.
-# Useful when the next POM version would compute incorrectly (e.g. after a hotfix branch).
-# Values must be in X.Y.Z format.
-
-[release.overrides]
-kiwi = "5.3.1"
 ```
 
 ### Settings reference
