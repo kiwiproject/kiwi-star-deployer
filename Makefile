@@ -12,7 +12,7 @@ help:
 	@echo "  test     run tests with the race detector"
 	@echo "  vet      run go vet"
 	@echo "  lint     run golangci-lint"
-	@echo "  check    vet + test + lint (vet/lint match CI; test also runs with -race)"
+	@echo "  check    vet + test + lint (matches CI)"
 	@echo "  fmt      format all Go source files"
 	@echo "  tidy     run go mod tidy"
 	@echo "  clean    remove the built binary"
