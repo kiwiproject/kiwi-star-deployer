@@ -160,13 +160,18 @@ func TestPrepare_happyPath_mainBranch(t *testing.T) {
 	}
 }
 
-func TestPrepare_happyPath_releaseBranch(t *testing.T) {
+func TestPrepare_releaseBranchIsRejected(t *testing.T) {
 	dir := t.TempDir()
-	fr := prepareRunner("release/1.2", "", nil, nil)
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: "release/1.2\n"}, nil)
 	w := workspace.New(dir, fr)
 
-	if err := w.Prepare("kiwi"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	err := w.Prepare("kiwi")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "release/1.2") {
+		t.Errorf("expected branch name in error, got: %v", err)
 	}
 }
 

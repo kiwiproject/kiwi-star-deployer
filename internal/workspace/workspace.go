@@ -77,10 +77,14 @@ func (w *Workspace) ReadFile(name, relPath string) (string, error) {
 	return result.Stdout, nil
 }
 
-// Prepare verifies that name's working copy is on an acceptable branch
-// (main or release/*), has no uncommitted changes, and is not in a detached
-// HEAD state. It then fetches from origin and resets to the latest remote
-// commit. Returns an error without attempting any repair if any check fails.
+// Prepare verifies that name's working copy is on main, has no uncommitted
+// changes, and is not in a detached HEAD state. It then fetches from origin
+// and resets to the latest remote commit. Returns an error without attempting
+// any repair if any check fails.
+//
+// This tool has no branch-switching logic of its own and always operates
+// against main; a repo checked out on any other branch is rejected rather
+// than tolerated.
 func (w *Workspace) Prepare(name string) error {
 	dir := w.RepoDir(name)
 
@@ -88,8 +92,8 @@ func (w *Workspace) Prepare(name string) error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", name, err)
 	}
-	if !isAcceptableBranch(branch) {
-		return fmt.Errorf("%s: on branch %q; must be main or release/*", name, branch)
+	if branch != "main" {
+		return fmt.Errorf("%s: on branch %q; must be main", name, branch)
 	}
 	if err := w.verifyClean(dir, name); err != nil {
 		return err
@@ -147,8 +151,4 @@ func (w *Workspace) resetHard(dir, name, branch string) error {
 		return fmt.Errorf("%s: git reset --hard origin/%s: %w", name, branch, err)
 	}
 	return nil
-}
-
-func isAcceptableBranch(branch string) bool {
-	return branch == "main" || strings.HasPrefix(branch, "release/")
 }

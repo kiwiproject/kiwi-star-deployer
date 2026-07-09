@@ -28,6 +28,10 @@ The following tools must be installed and on your PATH before running:
 
 Run `kiwi-star-deployer preflight` at any time to verify all prerequisites.
 
+Every configured library's local clone must be on the `main` branch with no
+uncommitted changes before `release` touches it; `main` is reset to match
+`origin/main` first. There is no support for releasing from any other branch.
+
 ## Installation
 
 Clone the repository and install:
