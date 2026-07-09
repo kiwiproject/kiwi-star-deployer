@@ -100,11 +100,6 @@ maven_central_max_wait = "1h"
 # Default: 30s
 maven_central_poll_interval = "30s"
 
-# Whether to verify GitHub Actions CI passes after each downstream POM update push.
-# Set to false to skip CI verification entirely.
-# Default: true
-ci_verify = true
-
 # How long to wait for CI runs to appear and complete after a POM update push.
 # Default: 30m
 ci_max_wait = "30m"
@@ -149,7 +144,6 @@ depends_on = ["kiwi-parent", "kiwi-bom", "kiwi"]
 | `maven_release_timeout` | duration | `1h` | Per-library timeout for mvn release:prepare release:perform |
 | `maven_central_max_wait` | duration | `1h` | Max wait for Maven Central publication |
 | `maven_central_poll_interval` | duration | `30s` | Poll interval for Maven Central |
-| `ci_verify` | bool | `true` | Verify CI after each POM update push |
 | `ci_max_wait` | duration | `30m` | Max wait for CI runs to complete |
 | `ci_poll_interval` | duration | `30s` | Poll interval for CI runs |
 
@@ -393,8 +387,8 @@ Stage 3:  kiwi-libraries-bom
 
 After each stage completes, the tool updates the `pom.xml` of every library
 in future stages that depends on a just-released library, commits the change,
-pushes it, and (if `ci_verify = true`) waits for GitHub Actions CI to pass
-before starting the next stage.
+pushes it, and waits for GitHub Actions CI to pass before starting the next
+stage.
 
 If any library in a stage fails, the entire run halts. Use `kiwi-star-deployer status`
 to see what completed, then `kiwi-star-deployer release --resume` to pick up

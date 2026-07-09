@@ -157,11 +157,9 @@ func runRelease(_ *cobra.Command, _ []string) error {
 		ChangelogSummaries:    summaries,
 		ChangelogSummaryFiles: summaryFiles,
 		SkipUnchanged:         !noAutoSkip,
-	}
-	if *cfg.Settings.CIVerify {
-		opts.CIChecker = &ci.GHChecker{Runner: r}
-		opts.CIMaxWait = time.Duration(cfg.Settings.CIMaxWait)
-		opts.CIPollInterval = time.Duration(cfg.Settings.CIPollInterval)
+		CIChecker:             &ci.GHChecker{Runner: r},
+		CIMaxWait:             time.Duration(cfg.Settings.CIMaxWait),
+		CIPollInterval:        time.Duration(cfg.Settings.CIPollInterval),
 	}
 
 	return release.Execute(os.Stdout, stages, ws, r, logBaseDir, opts)

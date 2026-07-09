@@ -41,13 +41,11 @@ func validate(cfg *Config) error {
 		errs = append(errs, fmt.Sprintf("at most one library may have type %q, found %d", TypeLibraryBOM, libraryBOMCount))
 	}
 
-	if cfg.Settings.CIVerify != nil && *cfg.Settings.CIVerify {
-		if cfg.Settings.CIMaxWait <= 0 {
-			errs = append(errs, "ci_max_wait must be positive when ci_verify is true")
-		}
-		if cfg.Settings.CIPollInterval <= 0 {
-			errs = append(errs, "ci_poll_interval must be positive when ci_verify is true")
-		}
+	if cfg.Settings.CIMaxWait <= 0 {
+		errs = append(errs, "ci_max_wait must be positive")
+	}
+	if cfg.Settings.CIPollInterval <= 0 {
+		errs = append(errs, "ci_poll_interval must be positive")
 	}
 
 	if len(errs) > 0 {

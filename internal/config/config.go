@@ -29,7 +29,6 @@ type Settings struct {
 	MavenReleaseTimeout      Duration `toml:"maven_release_timeout"`
 	MavenCentralMaxWait      Duration `toml:"maven_central_max_wait"`
 	MavenCentralPollInterval Duration `toml:"maven_central_poll_interval"`
-	CIVerify                 *bool    `toml:"ci_verify"`
 	CIMaxWait                Duration `toml:"ci_max_wait"`
 	CIPollInterval           Duration `toml:"ci_poll_interval"`
 }
@@ -107,10 +106,6 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Settings.MavenCentralPollInterval == 0 {
 		cfg.Settings.MavenCentralPollInterval = Duration(30 * time.Second)
-	}
-	if cfg.Settings.CIVerify == nil {
-		t := true
-		cfg.Settings.CIVerify = &t
 	}
 	if cfg.Settings.CIMaxWait == 0 {
 		cfg.Settings.CIMaxWait = Duration(30 * time.Minute)
