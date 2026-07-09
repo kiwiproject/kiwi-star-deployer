@@ -260,7 +260,6 @@ kiwi-star-deployer release [flags]
 | `--skip <lib>` | Treat a library as already released; requires `--resume` (repeatable) |
 | `--summary <libname=text>` | Prepend inline summary text to the changelog for a library (repeatable) |
 | `--summary-file <libname=/path>` | Prepend the contents of a file as a summary to the changelog for a library (repeatable) |
-| `--interactive` | Pause for confirmation between stages; `--interactive=step` additionally pauses before and after CI verification within each stage transition (the stage-level prompt still fires too) |
 
 **Examples**
 
@@ -281,20 +280,6 @@ Resume after a failure, treating a manually-released library as done:
 ```sh
 kiwi-star-deployer release --resume --skip kiwi-test
 ```
-
-Step through a release interactively, confirming each stage:
-
-```sh
-kiwi-star-deployer release --interactive
-```
-
-Step through with finer control, pausing before and after CI verification too:
-
-```sh
-kiwi-star-deployer release --interactive=step
-```
-
-Stopping at any prompt exits cleanly and preserves state so `--resume` can pick up where you left off. `--interactive` has no effect with `--dry-run`. When `ci_verify = false`, `--interactive=step` behaves the same as `--interactive=stage` since there are no CI steps to pause at.
 
 Major release with per-library changelog summaries:
 
