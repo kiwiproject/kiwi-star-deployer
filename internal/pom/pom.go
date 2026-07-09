@@ -4,25 +4,14 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 )
 
-// ReadProperties reads the <properties> section from the pom.xml at path and
+// ParseProperties reads the <properties> section from any XML source and
 // returns a map of property name to value. If the POM has no <properties>
 // element, an empty map is returned.
-func ReadProperties(path string) (map[string]string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("opening %s: %w", path, err)
-	}
-	defer func() { _ = f.Close() }()
-
-	props, err := parseProperties(xml.NewDecoder(f))
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return props, nil
+func ParseProperties(r io.Reader) (map[string]string, error) {
+	return parseProperties(xml.NewDecoder(r))
 }
 
 // parseProperties scans for the <properties> element that is a direct child of
@@ -84,24 +73,6 @@ func readPropertyChildren(dec *xml.Decoder, props map[string]string) error {
 // of <project>, or the version is not a SNAPSHOT.
 func ParseVersion(r io.Reader) (string, error) {
 	return parseVersion(xml.NewDecoder(r))
-}
-
-// ReadVersion reads the current version from the pom.xml at path. It returns
-// an error if the file cannot be read, the XML is malformed, no <version>
-// element exists as a direct child of <project>, or the version is not a
-// SNAPSHOT (which would indicate an unexpected post-release state).
-func ReadVersion(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("opening %s: %w", path, err)
-	}
-	defer func() { _ = f.Close() }()
-
-	version, err := ParseVersion(f)
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", path, err)
-	}
-	return version, nil
 }
 
 // parseVersion scans the XML token stream for the first <version> element

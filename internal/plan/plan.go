@@ -3,7 +3,6 @@ package plan
 import (
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
@@ -30,8 +29,9 @@ func (e Entry) IsLibraryBOM() bool {
 }
 
 // Build constructs the full release plan. It clones any repos not yet present
-// in the workspace, reads current POM versions, and computes release and next
-// development versions for every library in stage order.
+// in the workspace, then reads each library's pom.xml directly from
+// origin/main (never touching the local working copy), and computes release
+// and next development versions for every library in stage order.
 func Build(cfg *config.Config, ws *workspace.Workspace) ([][]Entry, error) {
 	stages, err := graph.New(cfg.Libraries).Stages()
 	if err != nil {
@@ -39,13 +39,18 @@ func Build(cfg *config.Config, ws *workspace.Workspace) ([][]Entry, error) {
 	}
 
 	result := make([][]Entry, len(stages))
+	var propErrs []string
 	for i, stage := range stages {
 		for _, name := range stage {
 			lib := cfg.Libraries[name]
 			if err := ws.EnsureCloned(name, lib); err != nil {
 				return nil, err
 			}
-			pomVersion, err := pom.ReadVersion(filepath.Join(ws.RepoDir(name), "pom.xml"))
+			pomContent, err := ws.ReadFile(name, "pom.xml")
+			if err != nil {
+				return nil, err
+			}
+			pomVersion, err := pom.ParseVersion(strings.NewReader(pomContent))
 			if err != nil {
 				return nil, err
 			}
@@ -61,47 +66,45 @@ func Build(cfg *config.Config, ws *workspace.Workspace) ([][]Entry, error) {
 				Stage:       i + 1,
 				VersionPlan: vp,
 			})
+
+			errs, err := validatePOMProperties(name, lib, cfg, pomContent)
+			if err != nil {
+				return nil, err
+			}
+			propErrs = append(propErrs, errs...)
 		}
 	}
-	if err := validatePOMProperties(result, cfg, ws); err != nil {
-		return nil, err
+	if len(propErrs) > 0 {
+		return nil, fmt.Errorf("POM property validation failed:\n%s", strings.Join(propErrs, "\n"))
 	}
 	return result, nil
 }
 
-// validatePOMProperties checks that every library's pom.xml contains a property
-// named <dep>.version for each non-parent-pom dependency. All violations are
-// collected and returned as a single error so the user can fix them all at once.
-func validatePOMProperties(stages [][]Entry, cfg *config.Config, ws *workspace.Workspace) error {
-	var errs []string
-	for _, stage := range stages {
-		for _, entry := range stage {
-			var needed []string
-			for _, depName := range entry.DependsOn {
-				if cfg.Libraries[depName].Type != config.TypeParentPOM {
-					needed = append(needed, depName)
-				}
-			}
-			if len(needed) == 0 {
-				continue
-			}
-			pomPath := filepath.Join(ws.RepoDir(entry.Name), "pom.xml")
-			props, err := pom.ReadProperties(pomPath)
-			if err != nil {
-				return fmt.Errorf("reading POM properties for %s: %w", entry.Name, err)
-			}
-			for _, depName := range needed {
-				propName := depName + ".version"
-				if _, ok := props[propName]; !ok {
-					errs = append(errs, fmt.Sprintf("  %s: missing property %q for dependency %s", entry.Name, propName, depName))
-				}
-			}
+// validatePOMProperties checks that pomContent contains a property named
+// <dep>.version for each of lib's non-parent-pom dependencies, returning one
+// violation message per missing property.
+func validatePOMProperties(name string, lib config.Library, cfg *config.Config, pomContent string) ([]string, error) {
+	var needed []string
+	for _, depName := range lib.DependsOn {
+		if cfg.Libraries[depName].Type != config.TypeParentPOM {
+			needed = append(needed, depName)
 		}
 	}
-	if len(errs) > 0 {
-		return fmt.Errorf("POM property validation failed:\n%s", strings.Join(errs, "\n"))
+	if len(needed) == 0 {
+		return nil, nil
 	}
-	return nil
+	props, err := pom.ParseProperties(strings.NewReader(pomContent))
+	if err != nil {
+		return nil, fmt.Errorf("reading POM properties for %s: %w", name, err)
+	}
+	var errs []string
+	for _, depName := range needed {
+		propName := depName + ".version"
+		if _, ok := props[propName]; !ok {
+			errs = append(errs, fmt.Sprintf("  %s: missing property %q for dependency %s", name, propName, depName))
+		}
+	}
+	return errs, nil
 }
 
 // Print writes the plan to w in a columnar format, one library per line.

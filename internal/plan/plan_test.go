@@ -15,6 +15,33 @@ import (
 	"github.com/kiwiproject/kiwi-star-deployer/internal/workspace"
 )
 
+// gitShowFromDiskRunner satisfies runner.Runner and simulates ws.ReadFile
+// without a real git remote: `git fetch origin` is a no-op success, and
+// `git show origin/main:<path>` returns the contents of <path> as it exists
+// on disk under WorkingDir. This lets tests write a pom.xml via createRepo /
+// createRepoWithProperties and have Build "read it from origin/main" the same
+// way it would read a real remote ref. Any other call is an error, so an
+// unexpected clone/checkout/reset would fail the test loudly.
+type gitShowFromDiskRunner struct{}
+
+func (r *gitShowFromDiskRunner) Run(opts runner.Options) (*runner.Result, error) {
+	if opts.Command == "git" && len(opts.Args) == 2 && opts.Args[0] == "fetch" {
+		return &runner.Result{}, nil
+	}
+	if opts.Command == "git" && len(opts.Args) == 2 && opts.Args[0] == "show" {
+		_, relPath, ok := strings.Cut(opts.Args[1], ":")
+		if !ok {
+			return nil, fmt.Errorf("gitShowFromDiskRunner: malformed git show arg %q", opts.Args[1])
+		}
+		content, err := os.ReadFile(filepath.Join(opts.WorkingDir, relPath))
+		if err != nil {
+			return nil, err
+		}
+		return &runner.Result{Stdout: string(content)}, nil
+	}
+	return nil, fmt.Errorf("gitShowFromDiskRunner: unexpected call: %s %v", opts.Command, opts.Args)
+}
+
 // createRepo writes a minimal pom.xml (no <properties>) into wsDir/<name>/.
 func createRepo(t *testing.T, wsDir, name, pomVersion string) {
 	t.Helper()
@@ -53,9 +80,53 @@ func createRepoWithProperties(t *testing.T, wsDir, name, pomVersion string, prop
 func makeWorkspace(t *testing.T) (string, *workspace.Workspace) {
 	t.Helper()
 	dir := t.TempDir()
-	// FakeRunner with no responses: EnsureCloned should never call the runner
-	// because all repos are pre-created.
-	return dir, workspace.New(dir, &runner.FakeRunner{})
+	// EnsureCloned never calls the runner because all repos are pre-created;
+	// gitShowFromDiskRunner serves the subsequent ws.ReadFile call from the
+	// pom.xml files createRepo/createRepoWithProperties wrote to disk.
+	return dir, workspace.New(dir, &gitShowFromDiskRunner{})
+}
+
+// TestBuild_readsFromRemoteNotLocalDisk proves the fix for the bug where plan
+// reported stale versions: Build must read pom.xml via ws.ReadFile (origin/main)
+// rather than the local working copy, and must never run any git command that
+// mutates the local clone (e.g. reset or checkout).
+func TestBuild_readsFromRemoteNotLocalDisk(t *testing.T) {
+	dir := t.TempDir()
+	// A stale, already-released version sits on local disk (e.g. left over
+	// from a manual release done outside this tool).
+	createRepo(t, dir, "kiwi", "2.5.1")
+
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{}, nil) // git fetch origin
+	fr.AddResponse(&runner.Result{Stdout: `<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <artifactId>kiwi</artifactId>
+    <version>2.6.0-SNAPSHOT</version>
+</project>`}, nil) // git show origin/main:pom.xml
+	ws := workspace.New(dir, fr)
+
+	cfg := &config.Config{
+		Settings: config.Settings{Workspace: dir},
+		Libraries: map[string]config.Library{
+			"kiwi": {Repo: "kiwiproject/kiwi"},
+		},
+	}
+
+	stages, err := plan.Build(cfg, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	entry := stages[0][0]
+	if entry.VersionPlan.CurrentVersion != "2.6.0-SNAPSHOT" {
+		t.Errorf("expected version read from origin/main, not local disk: got %q", entry.VersionPlan.CurrentVersion)
+	}
+
+	for _, call := range fr.Calls {
+		if call.Command == "git" && len(call.Args) > 0 && (call.Args[0] == "reset" || call.Args[0] == "checkout") {
+			t.Errorf("Build must never mutate the local working copy, but ran: %v", call.Args)
+		}
+	}
 }
 
 func TestBuild_singleLibrary(t *testing.T) {
@@ -63,7 +134,7 @@ func TestBuild_singleLibrary(t *testing.T) {
 	createRepo(t, dir, "kiwi", "2.5.1-SNAPSHOT")
 
 	cfg := &config.Config{
-		Settings:  config.Settings{Workspace: dir},
+		Settings: config.Settings{Workspace: dir},
 		Libraries: map[string]config.Library{
 			"kiwi": {Repo: "kiwiproject/kiwi"},
 		},

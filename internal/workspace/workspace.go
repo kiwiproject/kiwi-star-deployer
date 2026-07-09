@@ -12,6 +12,12 @@ import (
 
 // Workspace manages the local directory where library repos are cloned and
 // release operations are performed.
+//
+// Two ways to get repo content are available and serve different purposes:
+// ReadFile is read-only and never touches the local working copy — use it for
+// previewing state (e.g. plan). Prepare mutates the local working copy to
+// match the remote — use it immediately before performing real release work
+// that reads or writes the checked-out files.
 type Workspace struct {
 	dir    string
 	runner runner.Runner
@@ -49,6 +55,26 @@ func (w *Workspace) EnsureCloned(name string, lib config.Library) error {
 		return fmt.Errorf("cloning %s: %w", lib.Repo, err)
 	}
 	return nil
+}
+
+// ReadFile returns the contents of relPath as committed on origin/main for
+// name, without checking out, resetting, or otherwise modifying the local
+// working copy. It fetches first so the read reflects the latest remote
+// state regardless of what is currently checked out locally.
+func (w *Workspace) ReadFile(name, relPath string) (string, error) {
+	dir := w.RepoDir(name)
+	if err := w.fetch(dir, name); err != nil {
+		return "", err
+	}
+	result, err := w.runner.Run(runner.Options{
+		Command:    "git",
+		Args:       []string{"show", "origin/main:" + relPath},
+		WorkingDir: dir,
+	})
+	if err != nil {
+		return "", fmt.Errorf("%s: reading %s from origin/main: %w", name, relPath, err)
+	}
+	return result.Stdout, nil
 }
 
 // Prepare verifies that name's working copy is on an acceptable branch

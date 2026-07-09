@@ -69,6 +69,69 @@ func TestEnsureCloned_returnsErrorOnCloneFailure(t *testing.T) {
 	}
 }
 
+// --- ReadFile ---
+
+func TestReadFile_fetchesThenShowsRemoteRef(t *testing.T) {
+	dir := t.TempDir()
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{}, nil)                                   // git fetch origin
+	fr.AddResponse(&runner.Result{Stdout: "<version>1.2.3</version>"}, nil) // git show origin/main:pom.xml
+	w := workspace.New(dir, fr)
+
+	content, err := w.ReadFile("kiwi", "pom.xml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if content != "<version>1.2.3</version>" {
+		t.Errorf("content: got %q", content)
+	}
+	if fr.CallCount() != 2 {
+		t.Fatalf("expected 2 runner calls, got %d: %v", fr.CallCount(), fr.Calls)
+	}
+	fetchCall := fr.Calls[0]
+	if fetchCall.Command != "git" || strings.Join(fetchCall.Args, " ") != "fetch origin" {
+		t.Errorf("expected git fetch origin, got %v", fetchCall)
+	}
+	showCall := fr.Calls[1]
+	if showCall.Command != "git" || strings.Join(showCall.Args, " ") != "show origin/main:pom.xml" {
+		t.Errorf("expected git show origin/main:pom.xml, got %v", showCall)
+	}
+	if showCall.WorkingDir != filepath.Join(dir, "kiwi") {
+		t.Errorf("working dir: got %q, want %q", showCall.WorkingDir, filepath.Join(dir, "kiwi"))
+	}
+}
+
+func TestReadFile_fetchFails(t *testing.T) {
+	dir := t.TempDir()
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(nil, errors.New("network unreachable"))
+	w := workspace.New(dir, fr)
+
+	_, err := w.ReadFile("kiwi", "pom.xml")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "git fetch") {
+		t.Errorf("expected 'git fetch' in error, got: %v", err)
+	}
+}
+
+func TestReadFile_showFails(t *testing.T) {
+	dir := t.TempDir()
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{}, nil)
+	fr.AddResponse(nil, errors.New("fatal: path 'pom.xml' does not exist in 'origin/main'"))
+	w := workspace.New(dir, fr)
+
+	_, err := w.ReadFile("kiwi", "pom.xml")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "origin/main") {
+		t.Errorf("expected 'origin/main' in error, got: %v", err)
+	}
+}
+
 // --- Prepare ---
 
 // prepareRunner sets up a FakeRunner for the four Prepare commands in order:
