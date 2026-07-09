@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"text/tabwriter"
 
 	"github.com/kiwiproject/kiwi-star-deployer/internal/config"
@@ -31,7 +32,8 @@ func (e Entry) IsLibraryBOM() bool {
 // Build constructs the full release plan. It clones any repos not yet present
 // in the workspace, then reads each library's pom.xml directly from
 // origin/main (never touching the local working copy), and computes release
-// and next development versions for every library in stage order.
+// and next development versions for every library in stage order. Libraries
+// within a stage are independent by construction and are read concurrently.
 func Build(cfg *config.Config, ws *workspace.Workspace) ([][]Entry, error) {
 	stages, err := graph.New(cfg.Libraries).Stages()
 	if err != nil {
@@ -41,43 +43,93 @@ func Build(cfg *config.Config, ws *workspace.Workspace) ([][]Entry, error) {
 	result := make([][]Entry, len(stages))
 	var propErrs []string
 	for i, stage := range stages {
-		for _, name := range stage {
-			lib := cfg.Libraries[name]
-			if err := ws.EnsureCloned(name, lib); err != nil {
-				return nil, err
-			}
-			pomContent, err := ws.ReadFile(name, "pom.xml")
-			if err != nil {
-				return nil, err
-			}
-			pomVersion, err := pom.ParseVersion(strings.NewReader(pomContent))
-			if err != nil {
-				return nil, err
-			}
-			vp, err := version.Compute(name, pomVersion)
-			if err != nil {
-				return nil, err
-			}
-			result[i] = append(result[i], Entry{
-				Name:        name,
-				Repo:        lib.Repo,
-				Type:        lib.Type,
-				DependsOn:   lib.DependsOn,
-				Stage:       i + 1,
-				VersionPlan: vp,
-			})
-
-			errs, err := validatePOMProperties(name, lib, cfg, pomContent)
-			if err != nil {
-				return nil, err
-			}
-			propErrs = append(propErrs, errs...)
+		entries, errs, err := buildStage(cfg, ws, stage, i+1)
+		if err != nil {
+			return nil, err
 		}
+		result[i] = entries
+		propErrs = append(propErrs, errs...)
 	}
 	if len(propErrs) > 0 {
 		return nil, fmt.Errorf("POM property validation failed:\n%s", strings.Join(propErrs, "\n"))
 	}
 	return result, nil
+}
+
+// entryResult holds the outcome of building one library's Entry.
+type entryResult struct {
+	entry Entry
+	errs  []string
+	err   error
+}
+
+// buildStage reads pom.xml and computes the version plan for every library in
+// a stage concurrently, then returns the entries in the same order as stage.
+// Every library in the stage is always attempted; if any fail, all of their
+// errors are combined into one so a user fixing problems doesn't have to
+// discover them one at a time across repeated runs.
+func buildStage(cfg *config.Config, ws *workspace.Workspace, stage []string, stageNum int) ([]Entry, []string, error) {
+	results := make([]entryResult, len(stage))
+	var wg sync.WaitGroup
+
+	for i, name := range stage {
+		wg.Add(1)
+		go func(idx int, name string) {
+			defer wg.Done()
+			results[idx] = buildEntry(cfg, ws, name, stageNum)
+		}(i, name)
+	}
+	wg.Wait()
+
+	entries := make([]Entry, len(stage))
+	var propErrs []string
+	var buildErrs []string
+	for i, res := range results {
+		if res.err != nil {
+			buildErrs = append(buildErrs, fmt.Sprintf("  %s: %v", stage[i], res.err))
+			continue
+		}
+		entries[i] = res.entry
+		propErrs = append(propErrs, res.errs...)
+	}
+	if len(buildErrs) > 0 {
+		return nil, nil, fmt.Errorf("stage %d failed:\n%s", stageNum, strings.Join(buildErrs, "\n"))
+	}
+	return entries, propErrs, nil
+}
+
+// buildEntry clones name's repo if missing, reads its pom.xml from
+// origin/main, and computes its version plan and property-validation errors.
+func buildEntry(cfg *config.Config, ws *workspace.Workspace, name string, stageNum int) entryResult {
+	lib := cfg.Libraries[name]
+	if err := ws.EnsureCloned(name, lib); err != nil {
+		return entryResult{err: err}
+	}
+	pomContent, err := ws.ReadFile(name, "pom.xml")
+	if err != nil {
+		return entryResult{err: err}
+	}
+	pomVersion, err := pom.ParseVersion(strings.NewReader(pomContent))
+	if err != nil {
+		return entryResult{err: err}
+	}
+	vp, err := version.Compute(name, pomVersion)
+	if err != nil {
+		return entryResult{err: err}
+	}
+	entry := Entry{
+		Name:        name,
+		Repo:        lib.Repo,
+		Type:        lib.Type,
+		DependsOn:   lib.DependsOn,
+		Stage:       stageNum,
+		VersionPlan: vp,
+	}
+	errs, err := validatePOMProperties(name, lib, cfg, pomContent)
+	if err != nil {
+		return entryResult{err: err}
+	}
+	return entryResult{entry: entry, errs: errs}
 }
 
 // validatePOMProperties checks that pomContent contains a property named

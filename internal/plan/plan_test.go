@@ -207,6 +207,83 @@ func TestBuild_respectsStageOrder(t *testing.T) {
 	}
 }
 
+// TestBuild_concurrentStageEntriesResolveCorrectly proves libraries within a
+// stage are read correctly despite running concurrently: each must resolve
+// its own version, not one shuffled from another concurrently-read library,
+// and results must come back in the same (alphabetical) order graph.Stages
+// produces regardless of which goroutine finishes first.
+func TestBuild_concurrentStageEntriesResolveCorrectly(t *testing.T) {
+	dir, ws := makeWorkspace(t)
+	createRepo(t, dir, "kiwi", "2.5.1-SNAPSHOT")
+	createRepo(t, dir, "kiwi-test", "3.0.0-SNAPSHOT")
+
+	cfg := &config.Config{
+		Settings: config.Settings{Workspace: dir},
+		Libraries: map[string]config.Library{
+			"kiwi":      {Repo: "kiwiproject/kiwi"},
+			"kiwi-test": {Repo: "kiwiproject/kiwi-test"},
+		},
+	}
+
+	stages, err := plan.Build(cfg, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(stages) != 1 || len(stages[0]) != 2 {
+		t.Fatalf("expected 1 stage with 2 libraries, got %v", stages)
+	}
+	// graph.Stages sorts members alphabetically within a stage.
+	kiwi, kiwiTest := stages[0][0], stages[0][1]
+	if kiwi.Name != "kiwi" || kiwi.VersionPlan.ReleaseVersion != "2.5.1" {
+		t.Errorf("kiwi: got name %q version %q", kiwi.Name, kiwi.VersionPlan.ReleaseVersion)
+	}
+	if kiwiTest.Name != "kiwi-test" || kiwiTest.VersionPlan.ReleaseVersion != "3.0.0" {
+		t.Errorf("kiwi-test: got name %q version %q", kiwiTest.Name, kiwiTest.VersionPlan.ReleaseVersion)
+	}
+}
+
+// TestBuild_stageCombinesAllFailuresNotJustFirst proves that when multiple
+// libraries in the same stage fail, Build reports all of their errors
+// together rather than discarding all-but-the-first, since every library in
+// the stage is already attempted concurrently regardless of its siblings'
+// outcome.
+func TestBuild_stageCombinesAllFailuresNotJustFirst(t *testing.T) {
+	dir, ws := makeWorkspace(t)
+	// Neither pom.xml has a <version> element, so both fail to parse.
+	for _, name := range []string{"kiwi", "kiwi-test"} {
+		repoDir := filepath.Join(dir, name)
+		if err := os.MkdirAll(repoDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		content := `<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+</project>`
+		if err := os.WriteFile(filepath.Join(repoDir, "pom.xml"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := &config.Config{
+		Settings: config.Settings{Workspace: dir},
+		Libraries: map[string]config.Library{
+			"kiwi":      {Repo: "kiwiproject/kiwi"},
+			"kiwi-test": {Repo: "kiwiproject/kiwi-test"},
+		},
+	}
+
+	_, err := plan.Build(cfg, ws)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "kiwi:") {
+		t.Errorf("expected kiwi's failure in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "kiwi-test:") {
+		t.Errorf("expected kiwi-test's failure in error, got: %v", err)
+	}
+}
+
 func TestBuild_populatesTypeAndDependsOn(t *testing.T) {
 	dir, ws := makeWorkspace(t)
 	createRepo(t, dir, "kiwi-parent", "3.0.0-SNAPSHOT")

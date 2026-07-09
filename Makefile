@@ -9,10 +9,10 @@ help:
 	@echo "Targets:"
 	@echo "  build    build the binary"
 	@echo "  install  build and install to $(INSTALL_DIR)"
-	@echo "  test     run tests"
+	@echo "  test     run tests with the race detector"
 	@echo "  vet      run go vet"
 	@echo "  lint     run golangci-lint"
-	@echo "  check    vet + test + lint (matches CI)"
+	@echo "  check    vet + test + lint (vet/lint match CI; test also runs with -race)"
 	@echo "  fmt      format all Go source files"
 	@echo "  tidy     run go mod tidy"
 	@echo "  clean    remove the built binary"
@@ -28,7 +28,7 @@ install: build
 	@echo "Installed $(BINARY) to $(INSTALL_DIR)"
 
 test:
-	go test -count=1 ./...
+	go test -count=1 -race ./...
 
 vet:
 	go vet ./...
