@@ -140,6 +140,16 @@ func (w *Writer) Archive(destDir string) error {
 	return os.Rename(tmpName, filepath.Join(destDir, "state.json"))
 }
 
+// LogDir returns the log directory most recently recorded via SetLogDir.
+func (w *Writer) LogDir() string {
+	if w == nil {
+		return ""
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.state.LogDir
+}
+
 // SetLogDir records the log directory for this run and flushes to disk.
 func (w *Writer) SetLogDir(dir string) error {
 	if w == nil {

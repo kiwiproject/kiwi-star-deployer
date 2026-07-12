@@ -240,6 +240,28 @@ ci_poll_interval = "-1s"
 `,
 			wantErr: "ci_poll_interval must be positive",
 		},
+		{
+			name: "log_retention_days negative",
+			content: `
+[library.kiwi]
+repo = "kiwiproject/kiwi"
+
+[settings]
+log_retention_days = -1
+`,
+			wantErr: "log_retention_days must not be negative",
+		},
+		{
+			name: "log_retention_days too large",
+			content: `
+[library.kiwi]
+repo = "kiwiproject/kiwi"
+
+[settings]
+log_retention_days = 999999999
+`,
+			wantErr: "log_retention_days must be at most",
+		},
 	}
 
 	for _, tt := range tests {

@@ -55,7 +55,7 @@ func runLogsPurge(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	return purgeLogs(os.Stdout, os.Stdin, cfg.Settings.LogsDir(), age, purgeYes)
+	return purgeLogs(os.Stdout, os.Stdin, cfg.Settings.LogsDir(), age, purgeYes, "")
 }
 
 func listLogs(w io.Writer, logsDir string) error {
@@ -102,7 +102,11 @@ func listLogs(w io.Writer, logsDir string) error {
 	return nil
 }
 
-func purgeLogs(w io.Writer, r io.Reader, logsDir string, age time.Duration, yes bool) error {
+// purgeLogs deletes run log directories in logsDir older than age. exclude, if
+// non-empty, names a run directory that is never deleted regardless of its
+// age — used to protect the log directory of a release run still in
+// progress when auto-purge runs immediately after it.
+func purgeLogs(w io.Writer, r io.Reader, logsDir string, age time.Duration, yes bool, exclude string) error {
 	entries, err := os.ReadDir(logsDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -116,7 +120,7 @@ func purgeLogs(w io.Writer, r io.Reader, logsDir string, age time.Duration, yes 
 
 	var toDelete []os.DirEntry
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !e.IsDir() || e.Name() == exclude {
 			continue
 		}
 		t, err := time.ParseInLocation("2006-01-02T15-04-05", e.Name(), time.Local)

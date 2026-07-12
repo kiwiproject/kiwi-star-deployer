@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -162,7 +164,32 @@ func runRelease(_ *cobra.Command, _ []string) error {
 		CIPollInterval:        time.Duration(cfg.Settings.CIPollInterval),
 	}
 
-	return release.Execute(os.Stdout, stages, ws, r, logBaseDir, opts)
+	if err := release.Execute(os.Stdout, stages, ws, r, logBaseDir, opts); err != nil {
+		return err
+	}
+
+	excludeDir := filepath.Base(sw.LogDir())
+	if err := autoPurgeLogs(os.Stdout, logBaseDir, excludeDir, cfg.Settings.LogRetentionDays); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: auto-purging old logs: %v\n", err)
+	}
+	return nil
+}
+
+// autoPurgeLogs deletes run log directories older than retentionDays without
+// prompting, except excludeDir, which is always kept regardless of age — this
+// run's own directory, which can look "old" by name if the run was resumed
+// from a much earlier start time. It is a no-op if retentionDays is zero (the
+// default, meaning auto-purge is disabled). Only called after a successful
+// release, so it can never interrupt or delay the release itself.
+func autoPurgeLogs(w io.Writer, logsDir, excludeDir string, retentionDays int) error {
+	if retentionDays <= 0 {
+		return nil
+	}
+	age, err := parseAge(fmt.Sprintf("%dd", retentionDays))
+	if err != nil {
+		return err
+	}
+	return purgeLogs(w, nil, logsDir, age, true, excludeDir)
 }
 
 func filterStages(stages [][]plan.Entry, only []string) [][]plan.Entry {

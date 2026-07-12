@@ -108,6 +108,11 @@ ci_max_wait = "30m"
 # Default: 30s
 ci_poll_interval = "30s"
 
+# Age in days after which run log directories are automatically deleted at
+# the end of a successful release. 0 disables auto-purge.
+# Default: 0
+log_retention_days = 30
+
 
 # Each library to be released is declared as [library.<name>].
 # The name is used as the Maven artifactId.
@@ -146,6 +151,7 @@ depends_on = ["kiwi-parent", "kiwi-bom", "kiwi"]
 | `maven_central_poll_interval` | duration | `30s` | Poll interval for Maven Central |
 | `ci_max_wait` | duration | `30m` | Max wait for CI runs to complete |
 | `ci_poll_interval` | duration | `30s` | Poll interval for CI runs |
+| `log_retention_days` | int | `0` | Auto-purge run logs older than this many days after each successful release; `0` disables auto-purge |
 
 Duration values use Go duration syntax: `30s`, `5m`, `1h30m`.
 
@@ -412,6 +418,10 @@ Each library gets one log file capturing all output from its `mvn release:perfor
 Maven Central verification, and changelog steps. POM update commits get a
 separate `<library>-pom-update.log` file. Log files are written in real time,
 so you can `tail -f` them during a long release run.
+
+Set `log_retention_days` to automatically delete run directories older than
+that many days at the end of each successful release, without prompting. It's
+disabled by default (`0`); nothing is deleted unless you set it.
 
 ## Resetting to a clean slate
 

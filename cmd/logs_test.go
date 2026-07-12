@@ -187,6 +187,24 @@ func TestPurgeLogs_skipsNonRunDirectories(t *testing.T) {
 	}
 }
 
+func TestPurgeLogs_excludesNamedDirectoryRegardlessOfAge(t *testing.T) {
+	logsDir := t.TempDir()
+	excluded := makeDir(t, logsDir, "2020-01-01T00-00-00")
+	other := makeDir(t, logsDir, "2020-06-01T00-00-00")
+
+	var buf bytes.Buffer
+	if err := purgeLogs(&buf, nil, logsDir, 30*24*time.Hour, true, "2020-01-01T00-00-00"); err != nil {
+		t.Fatalf("purgeLogs: %v", err)
+	}
+
+	if _, err := os.Stat(excluded); err != nil {
+		t.Errorf("expected excluded directory to be kept, got error: %v", err)
+	}
+	if _, err := os.Stat(other); !os.IsNotExist(err) {
+		t.Errorf("expected non-excluded old directory to be deleted")
+	}
+}
+
 // ---- parseAge ----
 
 func TestParseAge(t *testing.T) {
@@ -233,7 +251,7 @@ func runPurgeLogs(t *testing.T, logsDir string, age time.Duration, yes bool, inp
 	t.Helper()
 	var buf bytes.Buffer
 	r := strings.NewReader(input)
-	if err := purgeLogs(&buf, r, logsDir, age, yes); err != nil {
+	if err := purgeLogs(&buf, r, logsDir, age, yes, ""); err != nil {
 		t.Fatalf("purgeLogs: %v", err)
 	}
 	return buf.String()

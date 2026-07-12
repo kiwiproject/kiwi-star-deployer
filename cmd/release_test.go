@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -261,6 +262,62 @@ func TestFilterStages_allMatchedPreservesAll(t *testing.T) {
 	}
 	if len(got[1]) != 2 {
 		t.Errorf("stage 2: expected 2 entries, got %d", len(got[1]))
+	}
+}
+
+func TestAutoPurgeLogs_disabledWhenRetentionIsZero(t *testing.T) {
+	logsDir := t.TempDir()
+	old := makeDir(t, logsDir, "2020-01-01T00-00-00")
+
+	var buf bytes.Buffer
+	if err := autoPurgeLogs(&buf, logsDir, "", 0); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := os.Stat(old); err != nil {
+		t.Errorf("expected directory to be kept when retention is disabled, got error: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("expected no output when retention is disabled, got: %q", buf.String())
+	}
+}
+
+func TestAutoPurgeLogs_deletesOldDirectoriesWithoutPrompting(t *testing.T) {
+	logsDir := t.TempDir()
+	old := makeDir(t, logsDir, "2020-01-01T00-00-00")
+	recent := makeDir(t, logsDir, "2099-01-01T00-00-00")
+
+	var buf bytes.Buffer
+	if err := autoPurgeLogs(&buf, logsDir, "", 30); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Errorf("expected old directory to be deleted")
+	}
+	if _, err := os.Stat(recent); err != nil {
+		t.Errorf("expected recent directory to be kept, got error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "Deleted 1 directory") {
+		t.Errorf("expected deletion confirmation in output, got:\n%s", buf.String())
+	}
+}
+
+func TestAutoPurgeLogs_excludesOwnRunDirectoryEvenIfOld(t *testing.T) {
+	logsDir := t.TempDir()
+	// Simulates a resumed run: its directory is named for the ORIGINAL start
+	// time, which can look older than the retention window by the time the
+	// resumed run finishes successfully.
+	ownDir := makeDir(t, logsDir, "2020-01-01T00-00-00")
+	other := makeDir(t, logsDir, "2020-06-01T00-00-00")
+
+	var buf bytes.Buffer
+	if err := autoPurgeLogs(&buf, logsDir, "2020-01-01T00-00-00", 30); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := os.Stat(ownDir); err != nil {
+		t.Errorf("expected own run directory to be kept despite its age, got error: %v", err)
+	}
+	if _, err := os.Stat(other); !os.IsNotExist(err) {
+		t.Errorf("expected other old directory to still be deleted")
 	}
 }
 

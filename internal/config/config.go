@@ -31,6 +31,7 @@ type Settings struct {
 	MavenCentralPollInterval Duration `toml:"maven_central_poll_interval"`
 	CIMaxWait                Duration `toml:"ci_max_wait"`
 	CIPollInterval           Duration `toml:"ci_poll_interval"`
+	LogRetentionDays         int      `toml:"log_retention_days"`
 }
 
 // LogsDir returns the base directory where release run logs are stored.

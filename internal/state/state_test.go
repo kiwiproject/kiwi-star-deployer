@@ -194,6 +194,27 @@ func TestWriter_SetLogDir(t *testing.T) {
 	if s.LogDir != "/logs/2025-11-15T14-30-00" {
 		t.Errorf("log_dir: got %q, want /logs/2025-11-15T14-30-00", s.LogDir)
 	}
+	if got := w.LogDir(); got != "/logs/2025-11-15T14-30-00" {
+		t.Errorf("LogDir(): got %q, want /logs/2025-11-15T14-30-00", got)
+	}
+}
+
+func TestWriter_LogDir_emptyBeforeSet(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	w, err := state.New(path, "run-1")
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	if got := w.LogDir(); got != "" {
+		t.Errorf("LogDir(): got %q, want empty string before SetLogDir is called", got)
+	}
+}
+
+func TestWriter_LogDir_nilSafe(t *testing.T) {
+	var w *state.Writer
+	if got := w.LogDir(); got != "" {
+		t.Errorf("LogDir() on nil Writer: got %q, want empty string", got)
+	}
 }
 
 func TestResume_preservesRunIDAndCompletedAndLogDir(t *testing.T) {
