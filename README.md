@@ -412,3 +412,30 @@ Each library gets one log file capturing all output from its `mvn release:perfor
 Maven Central verification, and changelog steps. POM update commits get a
 separate `<library>-pom-update.log` file. Log files are written in real time,
 so you can `tail -f` them during a long release run.
+
+## Resetting to a clean slate
+
+If the workspace or state file get into a confusing state, no special
+command is needed — the tool's mutable state lives in exactly two places,
+both plain files or directories:
+
+- `workspace` (default `~/.kiwi-star-deployer/workspace`) — cloned repos
+- `state_path` (default `~/.kiwi-star-deployer/state.json`) — run state
+
+To start over:
+
+```
+rm -rf ~/.kiwi-star-deployer/workspace ~/.kiwi-star-deployer/state.json
+```
+
+(use your configured paths if you changed `workspace`/`state_path`)
+
+Before deleting anything, run `kiwi-star-deployer status`. If it shows a
+Failed entry, or the run otherwise looks incomplete, some libraries may be
+only partially released — check the affected repos on GitHub first.
+Deleting `state.json` loses the ability to `--resume`, and deleting
+`workspace` can discard commits that only exist in the local clone and were
+never pushed.
+
+Log files are unaffected by this and are managed separately; see
+[Log files](#log-files) above.
