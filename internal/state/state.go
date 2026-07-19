@@ -80,13 +80,21 @@ func Resume(path string, prev *State) (*Writer, error) {
 }
 
 // RecordCompleted appends a completed entry and flushes to disk. Safe to call
-// from concurrent goroutines.
+// from concurrent goroutines. If the library already has a completed entry
+// (a resumed run re-records the libraries it skips as already completed),
+// the existing entry is kept unchanged so the original completion time is
+// preserved and the file never accumulates duplicates.
 func (w *Writer) RecordCompleted(library, version string) error {
 	if w == nil {
 		return nil
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	for _, e := range w.state.Completed {
+		if e.Library == library {
+			return nil
+		}
+	}
 	w.state.Completed = append(w.state.Completed, CompletedEntry{
 		Library:     library,
 		Version:     version,

@@ -67,6 +67,42 @@ func TestWriter_RecordCompleted(t *testing.T) {
 	}
 }
 
+func TestWriter_RecordCompleted_ignoresDuplicateLibrary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	prev := &state.State{
+		RunID: "run-1",
+		Completed: []state.CompletedEntry{
+			{Library: "kiwi-parent", Version: "3.0.0", CompletedAt: time.Date(2025, 11, 15, 14, 31, 22, 0, time.UTC)},
+		},
+	}
+	w, err := state.Resume(path, prev)
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+
+	// A resumed run re-records skipped libraries; the original entry must win.
+	if err := w.RecordCompleted("kiwi-parent", "3.0.0"); err != nil {
+		t.Fatalf("record duplicate: %v", err)
+	}
+	if err := w.RecordCompleted("kiwi", "5.0.0"); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+
+	s, err := state.Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(s.Completed) != 2 {
+		t.Fatalf("completed count: got %d, want 2", len(s.Completed))
+	}
+	if !s.Completed[0].CompletedAt.Equal(time.Date(2025, 11, 15, 14, 31, 22, 0, time.UTC)) {
+		t.Errorf("original completion time not preserved: got %v", s.Completed[0].CompletedAt)
+	}
+	if s.Completed[1].Library != "kiwi" {
+		t.Errorf("second entry: got %+v", s.Completed[1])
+	}
+}
+
 func TestWriter_RecordFailed(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	w, err := state.New(path, "run-1")
