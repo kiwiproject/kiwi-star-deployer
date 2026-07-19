@@ -335,13 +335,18 @@ func updatePOM(entry plan.Entry, deps []plan.Entry, ws *workspace.Workspace, r r
 // in a downstream POM.
 //
 // parent-pom deps are declared as a literal version in <parent>, so
-// versions:use-dep-version handles them. All other dep types (bom, library-bom,
-// regular libraries) are declared via a property named exactly
-// <artifactId>.version (e.g., kiwi-bom.version, kiwi.version), so
-// versions:set-property is required. If a dep deviates from this convention and
-// uses a literal version element, set-property will silently do nothing and the
-// git status check in updatePOM will skip the commit, surfacing the mismatch
-// without corrupting the POM.
+// versions:use-dep-version handles them. -DprocessParent=true is required: the
+// mojo's processParent parameter defaults to false, without which the <parent>
+// element is silently left unchanged. -DforceVersion=true skips the mojo's
+// repository-metadata availability check, which can lag behind actual artifact
+// publication right after a release; the artifact has already been verified
+// directly against Maven Central before any downstream POM update runs.
+// All other dep types (bom, library-bom, regular libraries) are declared via a
+// property named exactly <artifactId>.version (e.g., kiwi-bom.version,
+// kiwi.version), so versions:set-property is required. If a dep deviates from
+// this convention and uses a literal version element, set-property will
+// silently do nothing and the git status check in updatePOM will skip the
+// commit, surfacing the mismatch without corrupting the POM.
 func mavenVersionArgs(dep plan.Entry, groupID string) []string {
 	if dep.Type == config.TypeParentPOM {
 		return []string{
@@ -349,6 +354,8 @@ func mavenVersionArgs(dep plan.Entry, groupID string) []string {
 			"versions:use-dep-version",
 			"-Dincludes=" + groupID + ":" + dep.Name,
 			"-DdepVersion=" + dep.VersionPlan.ReleaseVersion,
+			"-DprocessParent=true",
+			"-DforceVersion=true",
 			"-DgenerateBackupPoms=false",
 		}
 	}

@@ -460,6 +460,8 @@ func TestExecute_verifyPOMUpdateArgs(t *testing.T) {
 		"versions:use-dep-version",
 		"-Dincludes=org.kiwiproject:kiwi-parent",
 		"-DdepVersion=3.0.0",
+		"-DprocessParent=true",
+		"-DforceVersion=true",
 		"-DgenerateBackupPoms=false",
 	} {
 		if !strings.Contains(versionArgs, want) {
