@@ -14,6 +14,7 @@ import (
 	"github.com/kiwiproject/kiwi-star-deployer/internal/plan"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/runner"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/state"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/version"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/workspace"
 )
 
@@ -59,7 +60,10 @@ type Options struct {
 	ChangelogSummaryFiles map[string]string
 	// SkipUnchanged automatically skips libraries whose last two commits are
 	// both maven-release-plugin commits, indicating nothing has changed since
-	// the most recent release.
+	// the most recent release. A skipped library still has its Maven Central
+	// availability verified, and if the GitHub release for its tag is missing
+	// (a previous run died before the changelog step), the changelog step is
+	// run for the already-released version before the skip is recorded.
 	SkipUnchanged bool
 }
 
@@ -413,7 +417,7 @@ func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, 
 			return libraryResult{name: entry.Name, logFile: logFile, failedStep: state.StepMavenRelease, err: fmt.Errorf("checking for changes: %w", err)}
 		}
 		if !changed {
-			return libraryResult{name: entry.Name, version: lastVersion, autoSkipped: true}
+			return verifySkippedRelease(entry, ws, r, logFile, opts, lastVersion)
 		}
 	}
 
@@ -466,23 +470,9 @@ func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, 
 	}
 
 	nextMilestone := strings.TrimSuffix(vp.NextDevVersion, "-SNAPSHOT")
-	changelogArgs := []string{
-		"--repository", entry.Repo,
-		"--previous-rev", previousRev,
-		"--revision", vp.ReleaseVersion,
-		"--output-type", "GITHUB",
-		"--close-milestone",
-		"--create-next-milestone", nextMilestone,
-		"--add-v-prefix-to-revisions",
-	}
-	if text, ok := opts.ChangelogSummaries[entry.Name]; ok {
-		changelogArgs = append(changelogArgs, "--summary", text)
-	} else if path, ok := opts.ChangelogSummaryFiles[entry.Name]; ok {
-		changelogArgs = append(changelogArgs, "--summary-file", path)
-	}
 	if _, err := r.Run(runner.Options{
 		Command:    opts.ChangelogScript,
-		Args:       changelogArgs,
+		Args:       changelogArgs(entry, previousRev, vp.ReleaseVersion, nextMilestone, opts),
 		WorkingDir: repoDir,
 		Stdout:     out,
 		Stderr:     out,
@@ -491,6 +481,104 @@ func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, 
 	}
 
 	return libraryResult{name: entry.Name, version: vp.ReleaseVersion, logFile: logFile}
+}
+
+// changelogArgs builds the argument list for one changelog script invocation.
+func changelogArgs(entry plan.Entry, previousRev, releaseVersion, nextMilestone string, opts Options) []string {
+	args := []string{
+		"--repository", entry.Repo,
+		"--previous-rev", previousRev,
+		"--revision", releaseVersion,
+		"--output-type", "GITHUB",
+		"--close-milestone",
+		"--create-next-milestone", nextMilestone,
+		"--add-v-prefix-to-revisions",
+	}
+	if text, ok := opts.ChangelogSummaries[entry.Name]; ok {
+		args = append(args, "--summary", text)
+	} else if path, ok := opts.ChangelogSummaryFiles[entry.Name]; ok {
+		args = append(args, "--summary-file", path)
+	}
+	return args
+}
+
+// verifySkippedRelease finishes verification for a library that auto-skip
+// determined has nothing new to release: lastVersion was already released by a
+// previous run. That run may have died after mvn pushed the release but before
+// Maven Central confirmed the artifact, or before the changelog step ran (the
+// typical failure when Maven Central publication is slow), so this re-verifies
+// Central availability and, if the GitHub release for the tag is missing, runs
+// the changelog step to create it, close the milestone, and open the next one.
+// Both checks are cheap no-ops for a release that fully completed.
+func verifySkippedRelease(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, logFile string, opts Options, lastVersion string) libraryResult {
+	f, err := os.Create(logFile)
+	if err != nil {
+		return libraryResult{name: entry.Name, logFile: logFile, err: fmt.Errorf("creating log file: %w", err)}
+	}
+	defer func() { _ = f.Close() }()
+
+	var buf bytes.Buffer
+	out := io.MultiWriter(f, &buf)
+
+	if err := opts.Checker.Wait(out, opts.GroupID, entry.Name, lastVersion, opts.MaxWait, opts.PollInterval); err != nil {
+		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepCentralVerify, err: err}
+	}
+
+	exists, err := githubReleaseExists(r, entry.Repo, "v"+lastVersion)
+	if err != nil {
+		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepChangelog, err: err}
+	}
+	if exists {
+		return libraryResult{name: entry.Name, version: lastVersion, logFile: logFile, autoSkipped: true}
+	}
+
+	fmt.Fprintf(out, "GitHub release v%s is missing; running changelog for the previously released version\n", lastVersion)
+
+	repoDir := ws.RepoDir(entry.Name)
+	prevResult, err := r.Run(runner.Options{
+		Command:    "git",
+		Args:       []string{"describe", "--tags", "--abbrev=0", "v" + lastVersion + "^"},
+		WorkingDir: repoDir,
+	})
+	if err != nil {
+		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepChangelog, err: fmt.Errorf("finding tag before v%s: %w", lastVersion, err)}
+	}
+	previousRev := strings.TrimPrefix(strings.TrimSpace(prevResult.Stdout), "v")
+
+	nextMilestone, err := version.NextPatch(lastVersion)
+	if err != nil {
+		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepChangelog, err: fmt.Errorf("computing next milestone: %w", err)}
+	}
+
+	if _, err := r.Run(runner.Options{
+		Command:    opts.ChangelogScript,
+		Args:       changelogArgs(entry, previousRev, lastVersion, nextMilestone, opts),
+		WorkingDir: repoDir,
+		Stdout:     out,
+		Stderr:     out,
+	}); err != nil {
+		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepChangelog, err: fmt.Errorf("changelog: %w", err)}
+	}
+
+	return libraryResult{name: entry.Name, version: lastVersion, logFile: logFile, autoSkipped: true}
+}
+
+// githubReleaseExists reports whether repo has a GitHub release for tag. It
+// queries the release-by-tag endpoint via gh; a 404 means the release is
+// missing, and any other failure (auth, network) is a real error the caller
+// should halt on rather than guessing.
+func githubReleaseExists(r runner.Runner, repo, tag string) (bool, error) {
+	result, err := r.Run(runner.Options{
+		Command: "gh",
+		Args:    []string{"api", "repos/" + repo + "/releases/tags/" + tag},
+	})
+	if err == nil {
+		return true, nil
+	}
+	if result != nil && strings.Contains(result.Stderr, "404") {
+		return false, nil
+	}
+	return false, fmt.Errorf("checking GitHub release for %s: %w", tag, err)
 }
 
 func pluralize(singular, plural string, n int) string {

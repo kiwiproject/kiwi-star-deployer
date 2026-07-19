@@ -850,6 +850,8 @@ func TestExecute_autoSkipUnchangedLibrary(t *testing.T) {
 	fr.AddResponse(&runner.Result{Stdout: "abc1234 [maven-release-plugin] prepare for next development iteration\ndef5678 [maven-release-plugin] prepare release v2.5.0\n"}, nil)
 	// git tag --points-at def5678: confirms the release commit is tagged
 	fr.AddResponse(&runner.Result{Stdout: "v2.5.0\n"}, nil)
+	// gh api release-by-tag: GitHub release exists, changelog already ran
+	fr.AddResponse(&runner.Result{Stdout: "{}"}, nil)
 
 	stages := makeStages(
 		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
@@ -863,9 +865,9 @@ func TestExecute_autoSkipUnchangedLibrary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// git log + git tag --points-at; mvn was never invoked.
-	if fr.CallCount() != 2 {
-		t.Errorf("expected 2 runner calls (git log, git tag), got %d", fr.CallCount())
+	// git log + git tag --points-at + gh api release check; mvn was never invoked.
+	if fr.CallCount() != 3 {
+		t.Errorf("expected 3 runner calls (git log, git tag, gh api), got %d", fr.CallCount())
 	}
 	out := buf.String()
 	if !strings.Contains(out, "skip") {
@@ -944,6 +946,7 @@ func TestExecute_autoSkipVersionExtractedFromCommitMessage(t *testing.T) {
 	fr := &runner.FakeRunner{}
 	fr.AddResponse(&runner.Result{Stdout: "abc1234 [maven-release-plugin] prepare for next development iteration\ndef5678 [maven-release-plugin] prepare release v3.1.4\n"}, nil)
 	fr.AddResponse(&runner.Result{Stdout: "v3.1.4\n"}, nil) // git tag --points-at
+	fr.AddResponse(&runner.Result{Stdout: "{}"}, nil)       // gh api: release exists
 
 	stages := makeStages(
 		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "3.1.5-SNAPSHOT")},
@@ -1001,9 +1004,10 @@ func TestExecute_autoSkipOneOfTwoLibrariesInStage(t *testing.T) {
 	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
-	// kiwi: unchanged — git log matches, tag confirmed
+	// kiwi: unchanged — git log matches, tag confirmed, GitHub release exists
 	fr.AddResponse(&runner.Result{Stdout: "abc1234 [maven-release-plugin] prepare for next development iteration\ndef5678 [maven-release-plugin] prepare release v2.5.0\n"}, nil)
 	fr.AddResponse(&runner.Result{Stdout: "v2.5.0\n"}, nil) // git tag --points-at
+	fr.AddResponse(&runner.Result{Stdout: "{}"}, nil)       // gh api: release exists
 	// kiwi-test: has changes (first commit is not maven-release-plugin), releases normally
 	fr.AddResponse(&runner.Result{Stdout: "abc1234 feat: new tests\ndef5678 [maven-release-plugin] prepare release v3.0.0\n"}, nil)
 	addLibraryResponses(fr, "v3.0.0") // kiwi-test: git describe, mvn, changelog
@@ -1030,9 +1034,141 @@ func TestExecute_autoSkipOneOfTwoLibrariesInStage(t *testing.T) {
 	if !strings.Contains(out, "done") || !strings.Contains(out, "kiwi-test") {
 		t.Errorf("expected kiwi-test to be released:\n%s", out)
 	}
-	// kiwi: git log + git tag (2); kiwi-test: git log + git describe + mvn + changelog (4) = 6
-	if fr.CallCount() != 6 {
-		t.Errorf("expected 6 runner calls, got %d", fr.CallCount())
+	// kiwi: git log + git tag + gh api (3); kiwi-test: git log + git describe + mvn + changelog (4) = 7
+	if fr.CallCount() != 7 {
+		t.Errorf("expected 7 runner calls, got %d", fr.CallCount())
+	}
+}
+
+func TestExecute_autoSkipVerifiesCentralAvailability(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: "abc1234 [maven-release-plugin] prepare for next development iteration\ndef5678 [maven-release-plugin] prepare release v2.5.0\n"}, nil)
+	fr.AddResponse(&runner.Result{Stdout: "v2.5.0\n"}, nil) // git tag --points-at
+	// No gh api response: the Central failure must halt before the release check.
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	opts := defaultOpts()
+	opts.SkipUnchanged = true
+	opts.Checker = &fakeCentral{err: errors.New("kiwi 2.5.0 not available in Maven Central after 1m0s")}
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err == nil {
+		t.Fatal("expected error when Central check fails for auto-skipped library, got nil")
+	}
+	if fr.CallCount() != 2 {
+		t.Errorf("expected 2 runner calls (git log, git tag), got %d", fr.CallCount())
+	}
+	if !strings.Contains(buf.String(), "FAILED") {
+		t.Errorf("expected FAILED in output:\n%s", buf.String())
+	}
+}
+
+func TestExecute_autoSkipRunsChangelogWhenGitHubReleaseMissing(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: "abc1234 [maven-release-plugin] prepare for next development iteration\ndef5678 [maven-release-plugin] prepare release v2.5.0\n"}, nil)
+	fr.AddResponse(&runner.Result{Stdout: "v2.5.0\n"}, nil) // git tag --points-at
+	// gh api release-by-tag: 404 — the previous run died before the changelog step
+	fr.AddResponse(&runner.Result{Stderr: "gh: Not Found (HTTP 404)"}, errors.New("exit status 1"))
+	fr.AddResponse(&runner.Result{Stdout: "v2.4.0\n"}, nil) // git describe v2.5.0^
+	fr.AddResponse(&runner.Result{}, nil)                   // changelog
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	opts := defaultOpts()
+	opts.SkipUnchanged = true
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fr.CallCount() != 5 {
+		t.Errorf("expected 5 runner calls, got %d", fr.CallCount())
+	}
+	changelogCall := fr.Calls[4]
+	if changelogCall.Command != ".generate-kiwi-changelog" {
+		t.Errorf("expected changelog script call, got %s", changelogCall.Command)
+	}
+	args := strings.Join(changelogCall.Args, " ")
+	for _, want := range []string{
+		"--previous-rev 2.4.0",
+		"--revision 2.5.0",
+		"--create-next-milestone 2.5.1",
+		"--close-milestone",
+	} {
+		if !strings.Contains(args, want) {
+			t.Errorf("expected %q in changelog args: %s", want, args)
+		}
+	}
+	if !strings.Contains(buf.String(), "skip") {
+		t.Errorf("expected 'skip' in output:\n%s", buf.String())
+	}
+}
+
+func TestExecute_autoSkipChangelogFailureHalts(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: "abc1234 [maven-release-plugin] prepare for next development iteration\ndef5678 [maven-release-plugin] prepare release v2.5.0\n"}, nil)
+	fr.AddResponse(&runner.Result{Stdout: "v2.5.0\n"}, nil) // git tag --points-at
+	fr.AddResponse(&runner.Result{Stderr: "gh: Not Found (HTTP 404)"}, errors.New("exit status 1"))
+	fr.AddResponse(&runner.Result{Stdout: "v2.4.0\n"}, nil)  // git describe v2.5.0^
+	fr.AddResponse(nil, errors.New("milestone API error"))   // changelog fails
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	opts := defaultOpts()
+	opts.SkipUnchanged = true
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err == nil {
+		t.Fatal("expected error when recovery changelog fails, got nil")
+	}
+	if !strings.Contains(buf.String(), "FAILED") {
+		t.Errorf("expected FAILED in output:\n%s", buf.String())
+	}
+}
+
+func TestExecute_autoSkipGitHubReleaseCheckErrorHalts(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: "abc1234 [maven-release-plugin] prepare for next development iteration\ndef5678 [maven-release-plugin] prepare release v2.5.0\n"}, nil)
+	fr.AddResponse(&runner.Result{Stdout: "v2.5.0\n"}, nil) // git tag --points-at
+	// gh api fails with something other than 404: must halt, not guess
+	fr.AddResponse(&runner.Result{Stderr: "gh: error connecting to api.github.com"}, errors.New("exit status 1"))
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	opts := defaultOpts()
+	opts.SkipUnchanged = true
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err == nil {
+		t.Fatal("expected error when GitHub release check fails, got nil")
+	}
+	if fr.CallCount() != 3 {
+		t.Errorf("expected 3 runner calls, got %d", fr.CallCount())
 	}
 }
 

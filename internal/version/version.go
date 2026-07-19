@@ -36,13 +36,22 @@ func Compute(name, pomVersion string) (Plan, error) {
 	}, nil
 }
 
-// nextPatchSnapshot parses a "X.Y.Z" version string and returns "X.Y.(Z+1)-SNAPSHOT".
-func nextPatchSnapshot(v string) (string, error) {
+// NextPatch parses an "X.Y.Z" version string and returns "X.Y.(Z+1)".
+func NextPatch(v string) (string, error) {
 	nums, err := parseXYZ(v)
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%d.%d.%d-SNAPSHOT", nums[0], nums[1], nums[2]+1), nil
+	return fmt.Sprintf("%d.%d.%d", nums[0], nums[1], nums[2]+1), nil
+}
+
+// nextPatchSnapshot parses a "X.Y.Z" version string and returns "X.Y.(Z+1)-SNAPSHOT".
+func nextPatchSnapshot(v string) (string, error) {
+	next, err := NextPatch(v)
+	if err != nil {
+		return "", err
+	}
+	return next + "-SNAPSHOT", nil
 }
 
 // parseXYZ parses an "X.Y.Z" version string into its three numeric components.
