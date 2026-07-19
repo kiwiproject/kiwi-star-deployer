@@ -47,6 +47,15 @@ func validate(cfg *Config) error {
 		errs = append(errs, fmt.Sprintf("at most one library may have type %q, found %d", TypeLibraryBOM, libraryBOMCount))
 	}
 
+	if cfg.Settings.MavenReleaseTimeout <= 0 {
+		errs = append(errs, "maven_release_timeout must be positive")
+	}
+	if cfg.Settings.MavenCentralMaxWait <= 0 {
+		errs = append(errs, "maven_central_max_wait must be positive")
+	}
+	if cfg.Settings.MavenCentralPollInterval <= 0 {
+		errs = append(errs, "maven_central_poll_interval must be positive")
+	}
 	if cfg.Settings.CIMaxWait <= 0 {
 		errs = append(errs, "ci_max_wait must be positive")
 	}

@@ -219,6 +219,39 @@ type = "unknown-type"
 			wantErr: `invalid type "unknown-type"`,
 		},
 		{
+			name: "maven_release_timeout negative",
+			content: `
+[library.kiwi]
+repo = "kiwiproject/kiwi"
+
+[settings]
+maven_release_timeout = "-1s"
+`,
+			wantErr: "maven_release_timeout must be positive",
+		},
+		{
+			name: "maven_central_max_wait negative",
+			content: `
+[library.kiwi]
+repo = "kiwiproject/kiwi"
+
+[settings]
+maven_central_max_wait = "-1s"
+`,
+			wantErr: "maven_central_max_wait must be positive",
+		},
+		{
+			name: "maven_central_poll_interval negative",
+			content: `
+[library.kiwi]
+repo = "kiwiproject/kiwi"
+
+[settings]
+maven_central_poll_interval = "-1s"
+`,
+			wantErr: "maven_central_poll_interval must be positive",
+		},
+		{
 			name: "ci_max_wait negative",
 			content: `
 [library.kiwi]
