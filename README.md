@@ -260,6 +260,25 @@ kiwi-star-deployer release [flags]
 | `--skip <lib>` | Treat a library as already released; requires `--resume` (repeatable) |
 | `--summary <libname=text>` | Prepend inline summary text to the changelog for a library (repeatable) |
 | `--summary-file <libname=/path>` | Prepend the contents of a file as a summary to the changelog for a library (repeatable) |
+| `--no-auto-skip` | Release every library, even ones with no changes since their last release |
+
+Before touching anything, `release` runs the same checks as `preflight`
+and `check-versions` and refuses to start if any fail (both are skipped
+for `--dry-run`). In particular, every configured library's POM SNAPSHOT
+version must have a matching open GitHub milestone — including libraries
+excluded by `--only`.
+
+Libraries with no changes since their last release are skipped
+automatically: if a library's two most recent commits are the
+maven-release-plugin commits from its previous release, there is nothing
+new to release. A skipped library still has its Maven Central
+availability verified, and if the GitHub release for its tag is missing
+(a previous run failed between publishing and the changelog step), the
+changelog step is run for the already-released version. Pass
+`--no-auto-skip` to force every library to release regardless.
+
+The Maven release build itself runs with tests skipped
+(`-Darguments=-DskipTests`); each repository's CI is the quality gate.
 
 **Examples**
 
@@ -301,9 +320,11 @@ kiwi-star-deployer release \
 
 ### plan
 
-Prints the computed release stages, dependency ordering, and resolved versions
-without cloning repos or making any changes. Useful for verifying the
-dependency graph before a release.
+Prints the computed release stages, dependency ordering, and resolved versions.
+Versions are read from each library's `pom.xml` as committed on `origin/main`:
+repos missing from the workspace are cloned first and existing clones are
+fetched, but local working copies are never modified and nothing is pushed or
+released. Useful for verifying the dependency graph before a release.
 
 ```sh
 kiwi-star-deployer plan
@@ -342,6 +363,27 @@ Example output:
 
 ---
 
+### check-versions
+
+Verifies that every configured library's POM SNAPSHOT version has a matching
+open GitHub milestone. Both are read via the GitHub API, so nothing is cloned
+and the workspace is not touched. The same check runs automatically at the
+start of every `release`. A failure usually means a milestone was renamed,
+closed early, or never created after a previous release.
+
+```sh
+kiwi-star-deployer check-versions
+```
+
+Example output:
+
+```
+[PASS]  kiwi-parent  3.0.16
+[FAIL]  kiwi         5.3.0  pom says 5.3.0 but open milestones are: 5.4.0
+```
+
+---
+
 ### status
 
 Displays the state of the current or most recent release run: which libraries
@@ -365,6 +407,23 @@ Failed:
   step:     maven-release
   error:    exit status 1
 ```
+
+---
+
+### logs
+
+Inspects and manages release run log directories.
+
+```sh
+kiwi-star-deployer logs list
+kiwi-star-deployer logs purge --older-than 30d
+```
+
+`logs list` prints one line per run: the run ID, how many libraries completed,
+and whether the run failed (and at which step). `logs purge` deletes run
+directories older than the given age — Go durations like `24h` or day counts
+like `30d` — after listing what will be deleted and prompting for
+confirmation; pass `--yes` to skip the prompt.
 
 ## How stages work
 
@@ -421,7 +480,8 @@ so you can `tail -f` them during a long release run.
 
 Set `log_retention_days` to automatically delete run directories older than
 that many days at the end of each successful release, without prompting. It's
-disabled by default (`0`); nothing is deleted unless you set it.
+disabled by default (`0`); nothing is deleted unless you set it. Past runs can
+be listed and manually purged with the [logs](#logs) command.
 
 ## Resetting to a clean slate
 
