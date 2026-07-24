@@ -1172,6 +1172,101 @@ func TestExecute_autoSkipGitHubReleaseCheckErrorHalts(t *testing.T) {
 	}
 }
 
+func TestExecute_firstReleaseCreatesSyntheticBaselineTag(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	// git describe: no tags — this is the library's first release
+	fr.AddResponse(nil, errors.New("fatal: No names found, cannot describe anything."))
+	fr.AddResponse(&runner.Result{Stdout: "abc123def456\n"}, nil) // git rev-list --max-parents=0
+	fr.AddResponse(&runner.Result{}, nil)                         // git tag -a v0.0.0
+	fr.AddResponse(&runner.Result{}, nil)                         // git push origin v0.0.0
+	fr.AddResponse(&runner.Result{}, nil)                         // mvn
+	fr.AddResponse(&runner.Result{}, nil)                         // changelog
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-new", Repo: "kiwiproject/kiwi-new", Stage: 1, VersionPlan: mustPlan("kiwi-new", "0.5.0-SNAPSHOT")},
+	)
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), defaultOpts())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fr.CallCount() != 6 {
+		t.Fatalf("expected 6 runner calls, got %d", fr.CallCount())
+	}
+
+	tagCall := strings.Join(fr.Calls[2].Args, " ")
+	if !strings.Contains(tagCall, "tag -a v0.0.0 abc123def456") {
+		t.Errorf("expected annotated v0.0.0 tag at root commit, got: %s", tagCall)
+	}
+	pushCall := strings.Join(fr.Calls[3].Args, " ")
+	if !strings.Contains(pushCall, "push origin v0.0.0") {
+		t.Errorf("expected push of v0.0.0, got: %s", pushCall)
+	}
+	changelogCall := strings.Join(fr.Calls[5].Args, " ")
+	for _, want := range []string{
+		"--previous-rev 0.0.0",
+		"--revision 0.5.0",
+		"--add-v-prefix-to-revisions",
+	} {
+		if !strings.Contains(changelogCall, want) {
+			t.Errorf("expected %q in changelog args: %s", want, changelogCall)
+		}
+	}
+	if !strings.Contains(buf.String(), "done") {
+		t.Errorf("expected 'done' in output:\n%s", buf.String())
+	}
+}
+
+func TestExecute_skipRejectsSyntheticBaselineTag(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	// git describe for --skip resolution: only the synthetic baseline exists
+	fr.AddResponse(&runner.Result{Stdout: "v0.0.0\n"}, nil)
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-new", Repo: "kiwiproject/kiwi-new", Stage: 1, VersionPlan: mustPlan("kiwi-new", "0.5.0-SNAPSHOT")},
+	)
+
+	opts := defaultOpts()
+	opts.Skip = []string{"kiwi-new"}
+
+	err := release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), opts)
+	if err == nil {
+		t.Fatal("expected error when --skip resolves to the synthetic baseline tag, got nil")
+	}
+	if !strings.Contains(err.Error(), "never been released") {
+		t.Errorf("expected synthetic baseline error, got: %v", err)
+	}
+}
+
+func TestExecute_firstReleaseRootCommitLookupFailureHalts(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(nil, errors.New("fatal: No names found, cannot describe anything."))
+	fr.AddResponse(nil, errors.New("fatal: bad revision"))
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-new", Repo: "kiwiproject/kiwi-new", Stage: 1, VersionPlan: mustPlan("kiwi-new", "0.5.0-SNAPSHOT")},
+	)
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), defaultOpts())
+	if err == nil {
+		t.Fatal("expected error when root commit lookup fails, got nil")
+	}
+	if !strings.Contains(buf.String(), "FAILED") {
+		t.Errorf("expected FAILED in output:\n%s", buf.String())
+	}
+}
+
 func TestExecute_sessionLogCreated(t *testing.T) {
 	dir := t.TempDir()
 	ws := workspace.New(dir, &prepareSuccessRunner{})

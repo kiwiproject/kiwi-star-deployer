@@ -202,7 +202,11 @@ func buildSkipVersions(opts Options, ws *workspace.Workspace, r runner.Runner) (
 		if err != nil {
 			return nil, fmt.Errorf("resolving version for --skip %q: %w", name, err)
 		}
-		skip[name] = strings.TrimPrefix(strings.TrimSpace(result.Stdout), "v")
+		v := strings.TrimPrefix(strings.TrimSpace(result.Stdout), "v")
+		if "v"+v == syntheticBaselineTag {
+			return nil, fmt.Errorf("--skip %q: latest tag is the synthetic changelog baseline %s; the library has never been released", name, syntheticBaselineTag)
+		}
+		skip[name] = v
 	}
 	return skip, nil
 }
@@ -434,15 +438,10 @@ func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, 
 	vp := entry.VersionPlan
 
 	// Capture the previous release tag before mvn creates the new one.
-	tagResult, err := r.Run(runner.Options{
-		Command:    "git",
-		Args:       []string{"describe", "--tags", "--abbrev=0"},
-		WorkingDir: repoDir,
-	})
+	previousRev, err := ensurePreviousReleaseTag(r, repoDir, "HEAD")
 	if err != nil {
-		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepMavenRelease, err: fmt.Errorf("git describe: %w", err)}
+		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepMavenRelease, err: err}
 	}
-	previousRev := strings.TrimPrefix(strings.TrimSpace(tagResult.Stdout), "v")
 
 	if _, err := r.Run(runner.Options{
 		Command: "mvn",
@@ -470,17 +469,75 @@ func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, 
 	}
 
 	nextMilestone := strings.TrimSuffix(vp.NextDevVersion, "-SNAPSHOT")
+	if err := runChangelog(r, entry, repoDir, previousRev, vp.ReleaseVersion, nextMilestone, out, opts); err != nil {
+		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepChangelog, err: err}
+	}
+
+	return libraryResult{name: entry.Name, version: vp.ReleaseVersion, logFile: logFile}
+}
+
+// syntheticBaselineTag is created at the root commit before a library's first
+// release, following the kiwiproject-changelog documentation: the changelog
+// tool always needs a previous revision to compute the commit range, and a
+// synthetic annotated tag at the very first commit anchors the first
+// release's changelog to the full history.
+const syntheticBaselineTag = "v0.0.0"
+
+// ensurePreviousReleaseTag returns the most recent release tag reachable from
+// ref, stripped of its v prefix. When no tag is reachable — the first release
+// of a library — it creates the synthetic annotated baseline tag at the
+// repository's root commit and pushes it, then returns that tag's version.
+func ensurePreviousReleaseTag(r runner.Runner, repoDir, ref string) (string, error) {
+	result, describeErr := r.Run(runner.Options{
+		Command:    "git",
+		Args:       []string{"describe", "--tags", "--abbrev=0", ref},
+		WorkingDir: repoDir,
+	})
+	if describeErr == nil {
+		return strings.TrimPrefix(strings.TrimSpace(result.Stdout), "v"), nil
+	}
+	rootResult, err := r.Run(runner.Options{
+		Command:    "git",
+		Args:       []string{"rev-list", "--max-parents=0", ref},
+		WorkingDir: repoDir,
+	})
+	if err != nil {
+		return "", fmt.Errorf("no release tag reachable from %s (%v) and finding root commit failed: %w", ref, describeErr, err)
+	}
+	lines := strings.Split(strings.TrimSpace(rootResult.Stdout), "\n")
+	root := strings.TrimSpace(lines[len(lines)-1])
+	if root == "" {
+		return "", fmt.Errorf("no release tag reachable from %s and no root commit found", ref)
+	}
+	if _, err := r.Run(runner.Options{
+		Command:    "git",
+		Args:       []string{"tag", "-a", syntheticBaselineTag, root, "-m", "Initial synthetic tag for changelog baseline"},
+		WorkingDir: repoDir,
+	}); err != nil {
+		return "", fmt.Errorf("creating synthetic baseline tag %s: %w", syntheticBaselineTag, err)
+	}
+	if _, err := r.Run(runner.Options{
+		Command:    "git",
+		Args:       []string{"push", "origin", syntheticBaselineTag},
+		WorkingDir: repoDir,
+	}); err != nil {
+		return "", fmt.Errorf("pushing synthetic baseline tag %s: %w", syntheticBaselineTag, err)
+	}
+	return strings.TrimPrefix(syntheticBaselineTag, "v"), nil
+}
+
+// runChangelog invokes the changelog script for one released version.
+func runChangelog(r runner.Runner, entry plan.Entry, repoDir, previousRev, releaseVersion, nextMilestone string, out io.Writer, opts Options) error {
 	if _, err := r.Run(runner.Options{
 		Command:    opts.ChangelogScript,
-		Args:       changelogArgs(entry, previousRev, vp.ReleaseVersion, nextMilestone, opts),
+		Args:       changelogArgs(entry, previousRev, releaseVersion, nextMilestone, opts),
 		WorkingDir: repoDir,
 		Stdout:     out,
 		Stderr:     out,
 	}); err != nil {
-		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepChangelog, err: fmt.Errorf("changelog: %w", err)}
+		return fmt.Errorf("changelog: %w", err)
 	}
-
-	return libraryResult{name: entry.Name, version: vp.ReleaseVersion, logFile: logFile}
+	return nil
 }
 
 // changelogArgs builds the argument list for one changelog script invocation.
@@ -535,29 +592,18 @@ func verifySkippedRelease(entry plan.Entry, ws *workspace.Workspace, r runner.Ru
 	fmt.Fprintf(out, "GitHub release v%s is missing; running changelog for the previously released version\n", lastVersion)
 
 	repoDir := ws.RepoDir(entry.Name)
-	prevResult, err := r.Run(runner.Options{
-		Command:    "git",
-		Args:       []string{"describe", "--tags", "--abbrev=0", "v" + lastVersion + "^"},
-		WorkingDir: repoDir,
-	})
+	previousRev, err := ensurePreviousReleaseTag(r, repoDir, "v"+lastVersion+"^")
 	if err != nil {
 		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepChangelog, err: fmt.Errorf("finding tag before v%s: %w", lastVersion, err)}
 	}
-	previousRev := strings.TrimPrefix(strings.TrimSpace(prevResult.Stdout), "v")
 
 	nextMilestone, err := version.NextPatch(lastVersion)
 	if err != nil {
 		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepChangelog, err: fmt.Errorf("computing next milestone: %w", err)}
 	}
 
-	if _, err := r.Run(runner.Options{
-		Command:    opts.ChangelogScript,
-		Args:       changelogArgs(entry, previousRev, lastVersion, nextMilestone, opts),
-		WorkingDir: repoDir,
-		Stdout:     out,
-		Stderr:     out,
-	}); err != nil {
-		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepChangelog, err: fmt.Errorf("changelog: %w", err)}
+	if err := runChangelog(r, entry, repoDir, previousRev, lastVersion, nextMilestone, out, opts); err != nil {
+		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepChangelog, err: err}
 	}
 
 	return libraryResult{name: entry.Name, version: lastVersion, logFile: logFile, autoSkipped: true}
