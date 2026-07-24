@@ -80,10 +80,17 @@ func runRelease(_ *cobra.Command, _ []string) error {
 			return fmt.Errorf("preflight failed; fix the issues above before releasing")
 		}
 
-		cvResults := checkversions.RunAll(r, cfg.Libraries)
-		checkversions.Print(os.Stdout, cvResults)
-		if !checkversions.AllPassed(cvResults) {
-			return fmt.Errorf("version check failed; fix the mismatches above before releasing")
+		// The milestone gate is skipped on --resume: a run that failed at
+		// maven-central-verify or changelog leaves the POM bumped to the next
+		// SNAPSHOT while the matching milestone is only created by the
+		// changelog step — the very step resume's recovery re-runs. Gating a
+		// resume on it would block the recovery that restores the invariant.
+		if !resume {
+			cvResults := checkversions.RunAll(r, cfg.Libraries)
+			checkversions.Print(os.Stdout, cvResults)
+			if !checkversions.AllPassed(cvResults) {
+				return fmt.Errorf("version check failed; fix the mismatches above before releasing")
+			}
 		}
 	}
 
