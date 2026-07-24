@@ -679,17 +679,17 @@ func hasChangesSinceLastRelease(ws *workspace.Workspace, r runner.Runner, name s
 	// Confirm the release commit carries a tag that matches the version in the
 	// commit message — guards against crafted messages, partial releases that
 	// left no tag, and any mismatch between the two.
-	version := extractReleaseVersion(msg1)
+	releasedVersion := extractReleaseVersion(msg1)
 	sha, _, _ := strings.Cut(lines[1], " ")
 	tagResult, err := r.Run(runner.Options{
 		Command:    "git",
 		Args:       []string{"tag", "--points-at", sha},
 		WorkingDir: ws.RepoDir(name),
 	})
-	if err != nil || !containsExactTag(tagResult.Stdout, "v"+version) {
+	if err != nil || !containsExactTag(tagResult.Stdout, "v"+releasedVersion) {
 		return true, "", nil
 	}
-	return false, version, nil
+	return false, releasedVersion, nil
 }
 
 // containsExactTag reports whether output (from "git tag --points-at")
