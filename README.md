@@ -268,6 +268,15 @@ for `--dry-run`). In particular, every configured library's POM SNAPSHOT
 version must have a matching open GitHub milestone — including libraries
 excluded by `--only`.
 
+While computing the plan, both `plan` and `release` also validate the
+config against each library's actual POM: any dependency in the POM
+(parent, dependencies, or dependencyManagement) whose groupId matches
+`group_id` and whose artifactId names another configured library must be
+listed in that library's `depends_on`. A missing edge would silently
+corrupt release ordering, so it fails the plan before anything is
+released. The `library-bom` type is exempt since it intentionally
+references every library and is always released last.
+
 Libraries with no changes since their last release are skipped
 automatically: if a library's two most recent commits are the
 maven-release-plugin commits from its previous release, there is nothing

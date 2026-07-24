@@ -418,6 +418,211 @@ func TestBuild_validationSkipsParentPOMDeps(t *testing.T) {
 	}
 }
 
+// createRepoWithPOM writes an exact pom.xml into wsDir/<name>/.
+func createRepoWithPOM(t *testing.T, wsDir, name, pomContent string) {
+	t.Helper()
+	repoDir := filepath.Join(wsDir, name)
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "pom.xml"), []byte(pomContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBuild_dependsOnDriftInDependenciesFails(t *testing.T) {
+	dir, ws := makeWorkspace(t)
+	createRepo(t, dir, "kiwi-bom", "2.0.0-SNAPSHOT")
+	// kiwi's POM depends on kiwi-bom, but the config does not declare it.
+	createRepoWithPOM(t, dir, "kiwi", `<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <artifactId>kiwi</artifactId>
+    <version>4.0.0-SNAPSHOT</version>
+    <dependencies>
+        <dependency>
+            <groupId>org.kiwiproject</groupId>
+            <artifactId>kiwi-bom</artifactId>
+        </dependency>
+    </dependencies>
+</project>`)
+
+	cfg := &config.Config{
+		Settings: config.Settings{Workspace: dir, GroupID: "org.kiwiproject"},
+		Libraries: map[string]config.Library{
+			"kiwi-bom": {Repo: "kiwiproject/kiwi-bom", Type: "bom"},
+			"kiwi":     {Repo: "kiwiproject/kiwi"},
+		},
+	}
+
+	_, err := plan.Build(cfg, ws)
+	if err == nil {
+		t.Fatal("expected depends_on drift error, got nil")
+	}
+	if !strings.Contains(err.Error(), "kiwi: pom.xml depends on kiwi-bom but depends_on does not list it") {
+		t.Errorf("expected drift message in error: %v", err)
+	}
+}
+
+func TestBuild_dependsOnDriftViaParentFails(t *testing.T) {
+	dir, ws := makeWorkspace(t)
+	createRepo(t, dir, "kiwi-parent", "3.0.0-SNAPSHOT")
+	// kiwi's POM inherits from kiwi-parent, but the config does not declare it.
+	createRepoWithPOM(t, dir, "kiwi", `<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.kiwiproject</groupId>
+        <artifactId>kiwi-parent</artifactId>
+        <version>3.0.0</version>
+    </parent>
+    <artifactId>kiwi</artifactId>
+    <version>4.0.0-SNAPSHOT</version>
+</project>`)
+
+	cfg := &config.Config{
+		Settings: config.Settings{Workspace: dir, GroupID: "org.kiwiproject"},
+		Libraries: map[string]config.Library{
+			"kiwi-parent": {Repo: "kiwiproject/kiwi-parent", Type: "parent-pom"},
+			"kiwi":        {Repo: "kiwiproject/kiwi"},
+		},
+	}
+
+	_, err := plan.Build(cfg, ws)
+	if err == nil {
+		t.Fatal("expected depends_on drift error, got nil")
+	}
+	if !strings.Contains(err.Error(), "kiwi: pom.xml depends on kiwi-parent") {
+		t.Errorf("expected drift message in error: %v", err)
+	}
+}
+
+func TestBuild_dependsOnDeclaredPasses(t *testing.T) {
+	dir, ws := makeWorkspace(t)
+	createRepo(t, dir, "kiwi-parent", "3.0.0-SNAPSHOT")
+	createRepoWithPOM(t, dir, "kiwi", `<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.kiwiproject</groupId>
+        <artifactId>kiwi-parent</artifactId>
+        <version>3.0.0</version>
+    </parent>
+    <artifactId>kiwi</artifactId>
+    <version>4.0.0-SNAPSHOT</version>
+</project>`)
+
+	cfg := &config.Config{
+		Settings: config.Settings{Workspace: dir, GroupID: "org.kiwiproject"},
+		Libraries: map[string]config.Library{
+			"kiwi-parent": {Repo: "kiwiproject/kiwi-parent", Type: "parent-pom"},
+			"kiwi":        {Repo: "kiwiproject/kiwi", DependsOn: []string{"kiwi-parent"}},
+		},
+	}
+
+	if _, err := plan.Build(cfg, ws); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBuild_dependsOnIgnoresOtherGroupsAndUnconfigured(t *testing.T) {
+	dir, ws := makeWorkspace(t)
+	createRepoWithPOM(t, dir, "kiwi", `<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <artifactId>kiwi</artifactId>
+    <version>4.0.0-SNAPSHOT</version>
+    <dependencies>
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.kiwiproject</groupId>
+            <artifactId>not-in-config</artifactId>
+        </dependency>
+    </dependencies>
+</project>`)
+
+	cfg := &config.Config{
+		Settings: config.Settings{Workspace: dir, GroupID: "org.kiwiproject"},
+		Libraries: map[string]config.Library{
+			"kiwi": {Repo: "kiwiproject/kiwi"},
+		},
+	}
+
+	if _, err := plan.Build(cfg, ws); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBuild_dependsOnMatchesProjectGroupIdExpression(t *testing.T) {
+	dir, ws := makeWorkspace(t)
+	createRepo(t, dir, "kiwi-test", "3.0.0-SNAPSHOT")
+	createRepoWithPOM(t, dir, "kiwi", `<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <artifactId>kiwi</artifactId>
+    <version>4.0.0-SNAPSHOT</version>
+    <dependencies>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>kiwi-test</artifactId>
+        </dependency>
+    </dependencies>
+</project>`)
+
+	cfg := &config.Config{
+		Settings: config.Settings{Workspace: dir, GroupID: "org.kiwiproject"},
+		Libraries: map[string]config.Library{
+			"kiwi-test": {Repo: "kiwiproject/kiwi-test"},
+			"kiwi":      {Repo: "kiwiproject/kiwi"},
+		},
+	}
+
+	_, err := plan.Build(cfg, ws)
+	if err == nil {
+		t.Fatal("expected depends_on drift error for ${project.groupId} dependency, got nil")
+	}
+	if !strings.Contains(err.Error(), "kiwi: pom.xml depends on kiwi-test") {
+		t.Errorf("expected drift message in error: %v", err)
+	}
+}
+
+func TestBuild_libraryBOMExemptFromDependsOnValidation(t *testing.T) {
+	dir, ws := makeWorkspace(t)
+	createRepo(t, dir, "kiwi", "4.0.0-SNAPSHOT")
+	// kiwi-libraries-bom manages versions of every library without declaring
+	// them in depends_on; synthetic graph edges already release it last.
+	createRepoWithPOM(t, dir, "kiwi-libraries-bom", `<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <artifactId>kiwi-libraries-bom</artifactId>
+    <version>2.0.0-SNAPSHOT</version>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.kiwiproject</groupId>
+                <artifactId>kiwi</artifactId>
+                <version>4.0.0</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+</project>`)
+
+	cfg := &config.Config{
+		Settings: config.Settings{Workspace: dir, GroupID: "org.kiwiproject"},
+		Libraries: map[string]config.Library{
+			"kiwi":               {Repo: "kiwiproject/kiwi"},
+			"kiwi-libraries-bom": {Repo: "kiwiproject/kiwi-libraries-bom", Type: "library-bom"},
+		},
+	}
+
+	if _, err := plan.Build(cfg, ws); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestPrint_basicOutput(t *testing.T) {
 	stages := [][]plan.Entry{
 		{{Name: "kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")}},

@@ -51,7 +51,7 @@ func Build(cfg *config.Config, ws *workspace.Workspace) ([][]Entry, error) {
 		propErrs = append(propErrs, errs...)
 	}
 	if len(propErrs) > 0 {
-		return nil, fmt.Errorf("POM property validation failed:\n%s", strings.Join(propErrs, "\n"))
+		return nil, fmt.Errorf("POM validation failed:\n%s", strings.Join(propErrs, "\n"))
 	}
 	return result, nil
 }
@@ -129,7 +129,55 @@ func buildEntry(cfg *config.Config, ws *workspace.Workspace, name string, stageN
 	if err != nil {
 		return entryResult{err: err}
 	}
+	dependsOnErrs, err := validateDependsOn(name, lib, cfg, pomContent)
+	if err != nil {
+		return entryResult{err: err}
+	}
+	errs = append(errs, dependsOnErrs...)
 	return entryResult{entry: entry, errs: errs}
+}
+
+// validateDependsOn checks the config against the POM's actual dependencies:
+// every artifact the POM references (parent, dependencies, and
+// dependencyManagement entries) whose groupId matches the configured group
+// and whose artifactId names another configured library must be listed in
+// lib's depends_on. A missing edge silently corrupts release ordering, which
+// is exactly what the explicit config exists to prevent. The library-bom
+// type is exempt: its POM intentionally references every library, and
+// synthetic graph edges already force it to release last. The reverse
+// direction — an edge declared in depends_on but absent from the POM — only
+// makes staging more conservative and is not flagged.
+func validateDependsOn(name string, lib config.Library, cfg *config.Config, pomContent string) ([]string, error) {
+	if lib.Type == config.TypeLibraryBOM {
+		return nil, nil
+	}
+	deps, err := pom.ParseDependencies(strings.NewReader(pomContent))
+	if err != nil {
+		return nil, fmt.Errorf("reading POM dependencies for %s: %w", name, err)
+	}
+	declared := make(map[string]bool, len(lib.DependsOn))
+	for _, d := range lib.DependsOn {
+		declared[d] = true
+	}
+	var errs []string
+	seen := make(map[string]bool)
+	for _, dep := range deps {
+		// ${project.groupId} resolves to the configured group for every
+		// library this tool releases, so treat it as a match rather than
+		// missing a sibling dependency declared that way.
+		groupMatches := dep.GroupID == cfg.Settings.GroupID || dep.GroupID == "${project.groupId}"
+		if !groupMatches || dep.ArtifactID == name || seen[dep.ArtifactID] {
+			continue
+		}
+		if _, configured := cfg.Libraries[dep.ArtifactID]; !configured {
+			continue
+		}
+		seen[dep.ArtifactID] = true
+		if !declared[dep.ArtifactID] {
+			errs = append(errs, fmt.Sprintf("  %s: pom.xml depends on %s but depends_on does not list it", name, dep.ArtifactID))
+		}
+	}
+	return errs, nil
 }
 
 // validatePOMProperties checks that pomContent contains a property named

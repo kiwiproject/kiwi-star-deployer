@@ -114,3 +114,82 @@ func TestParseProperties_invalidXMLIsError(t *testing.T) {
 		t.Fatal("expected error for invalid XML, got nil")
 	}
 }
+
+func TestParseDependencies_fullPOM(t *testing.T) {
+	content := `<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.kiwiproject</groupId>
+        <artifactId>kiwi-parent</artifactId>
+        <version>3.0.0</version>
+    </parent>
+    <artifactId>kiwi</artifactId>
+    <version>4.0.0-SNAPSHOT</version>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.kiwiproject</groupId>
+                <artifactId>kiwi-bom</artifactId>
+                <version>${kiwi-bom.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>kiwi-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>`
+
+	deps, err := pom.ParseDependencies(strings.NewReader(content))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []pom.Dependency{
+		{GroupID: "org.kiwiproject", ArtifactID: "kiwi-parent"},
+		{GroupID: "com.google.guava", ArtifactID: "guava"},
+		{GroupID: "${project.groupId}", ArtifactID: "kiwi-test"},
+		{GroupID: "org.kiwiproject", ArtifactID: "kiwi-bom"},
+	}
+	if len(deps) != len(want) {
+		t.Fatalf("dependency count: got %d (%v), want %d", len(deps), deps, len(want))
+	}
+	for i, w := range want {
+		if deps[i] != w {
+			t.Errorf("dep %d: got %+v, want %+v", i, deps[i], w)
+		}
+	}
+}
+
+func TestParseDependencies_noDependencies(t *testing.T) {
+	content := `<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <artifactId>kiwi-parent</artifactId>
+    <version>3.0.0-SNAPSHOT</version>
+</project>`
+
+	deps, err := pom.ParseDependencies(strings.NewReader(content))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(deps) != 0 {
+		t.Errorf("expected no dependencies, got %v", deps)
+	}
+}
+
+func TestParseDependencies_malformedXML(t *testing.T) {
+	_, err := pom.ParseDependencies(strings.NewReader("<project><dependencies>"))
+	if err == nil {
+		t.Fatal("expected error for malformed XML, got nil")
+	}
+}

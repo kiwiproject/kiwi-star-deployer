@@ -68,6 +68,42 @@ func readPropertyChildren(dec *xml.Decoder, props map[string]string) error {
 	}
 }
 
+// Dependency identifies one artifact referenced by a POM.
+type Dependency struct {
+	GroupID    string
+	ArtifactID string
+}
+
+// ParseDependencies returns every artifact the POM references that can affect
+// release ordering: the <parent> artifact, entries in <dependencies>, and
+// entries in <dependencyManagement> (which includes BOM imports). Version
+// elements are ignored; only the coordinates are extracted.
+func ParseDependencies(r io.Reader) ([]Dependency, error) {
+	type coord struct {
+		GroupID    string `xml:"groupId"`
+		ArtifactID string `xml:"artifactId"`
+	}
+	var doc struct {
+		Parent  coord   `xml:"parent"`
+		Deps    []coord `xml:"dependencies>dependency"`
+		Managed []coord `xml:"dependencyManagement>dependencies>dependency"`
+	}
+	if err := xml.NewDecoder(r).Decode(&doc); err != nil {
+		return nil, fmt.Errorf("parsing XML: %w", err)
+	}
+	var deps []Dependency
+	if doc.Parent.ArtifactID != "" {
+		deps = append(deps, Dependency{GroupID: doc.Parent.GroupID, ArtifactID: doc.Parent.ArtifactID})
+	}
+	for _, d := range doc.Deps {
+		deps = append(deps, Dependency(d))
+	}
+	for _, d := range doc.Managed {
+		deps = append(deps, Dependency(d))
+	}
+	return deps, nil
+}
+
 // ParseVersion reads the project version from any XML source. It returns an
 // error if the XML is malformed, no <version> element exists as a direct child
 // of <project>, or the version is not a SNAPSHOT.
