@@ -37,9 +37,12 @@ func TestAllPassed_emptySlice(t *testing.T) {
 	}
 }
 
+const ghVersionOutput = "gh version 2.62.0 (2024-11-14)\nhttps://github.com/cli/cli/releases/tag/v2.62.0\n"
+
 func TestRunAll_ghAuthPass(t *testing.T) {
 	fr := &runner.FakeRunner{}
-	fr.AddResponse(&runner.Result{}, nil)
+	fr.AddResponse(&runner.Result{Stdout: ghVersionOutput}, nil) // gh --version
+	fr.AddResponse(&runner.Result{}, nil)                        // gh auth status
 
 	results := preflight.RunAll(fr, ".generate-kiwi-changelog")
 
@@ -60,7 +63,8 @@ func TestRunAll_ghAuthPass(t *testing.T) {
 
 func TestRunAll_ghAuthFail(t *testing.T) {
 	fr := &runner.FakeRunner{}
-	fr.AddResponse(nil, errors.New("exit status 1"))
+	fr.AddResponse(&runner.Result{Stdout: ghVersionOutput}, nil) // gh --version
+	fr.AddResponse(nil, errors.New("exit status 1"))             // gh auth status
 
 	results := preflight.RunAll(fr, ".generate-kiwi-changelog")
 
@@ -79,6 +83,87 @@ func TestRunAll_ghAuthFail(t *testing.T) {
 	}
 	if !strings.Contains(authResult.Message, "gh auth login") {
 		t.Errorf("expected fix hint in message, got: %q", authResult.Message)
+	}
+}
+
+func findResult(t *testing.T, results []preflight.Result, name string) preflight.Result {
+	t.Helper()
+	for _, r := range results {
+		if r.Name == name {
+			return r
+		}
+	}
+	t.Fatalf("no %q result found", name)
+	return preflight.Result{}
+}
+
+func TestRunAll_ghVersionPass(t *testing.T) {
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: ghVersionOutput}, nil) // gh --version
+	fr.AddResponse(&runner.Result{}, nil)                        // gh auth status
+
+	res := findResult(t, preflight.RunAll(fr, ".generate-kiwi-changelog"), "gh version")
+	if !res.OK {
+		t.Errorf("expected gh version OK=true, got false: %s", res.Message)
+	}
+}
+
+func TestRunAll_ghVersionTooOld(t *testing.T) {
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: "gh version 2.39.2 (2023-11-01)\n"}, nil) // gh --version
+	fr.AddResponse(&runner.Result{}, nil)                                           // gh auth status
+
+	res := findResult(t, preflight.RunAll(fr, ".generate-kiwi-changelog"), "gh version")
+	if res.OK {
+		t.Error("expected gh version OK=false for 2.39.2, got true")
+	}
+	if !strings.Contains(res.Message, "2.40.0") {
+		t.Errorf("expected required version in message, got: %q", res.Message)
+	}
+}
+
+func TestRunAll_ghVersionExactMinimum(t *testing.T) {
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: "gh version 2.40.0 (2023-11-14)\n"}, nil) // gh --version
+	fr.AddResponse(&runner.Result{}, nil)                                           // gh auth status
+
+	res := findResult(t, preflight.RunAll(fr, ".generate-kiwi-changelog"), "gh version")
+	if !res.OK {
+		t.Errorf("expected gh version 2.40.0 to pass, got: %s", res.Message)
+	}
+}
+
+func TestRunAll_ghVersionUnparseable(t *testing.T) {
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: "something unexpected\n"}, nil) // gh --version
+	fr.AddResponse(&runner.Result{}, nil)                                // gh auth status
+
+	res := findResult(t, preflight.RunAll(fr, ".generate-kiwi-changelog"), "gh version")
+	if res.OK {
+		t.Error("expected gh version OK=false for unparseable output, got true")
+	}
+}
+
+func TestRunAll_ghVersionCommandError(t *testing.T) {
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(nil, errors.New("exec: gh: not found")) // gh --version
+	fr.AddResponse(&runner.Result{}, nil)                  // gh auth status
+
+	res := findResult(t, preflight.RunAll(fr, ".generate-kiwi-changelog"), "gh version")
+	if res.OK {
+		t.Error("expected gh version OK=false when gh --version fails, got true")
+	}
+}
+
+func TestPrint_includesUnverifiableNote(t *testing.T) {
+	var buf bytes.Buffer
+	preflight.Print(&buf, []preflight.Result{{Name: "git", OK: true}})
+	out := buf.String()
+	if !strings.Contains(out, "cannot be verified") {
+		t.Errorf("expected unverifiable-prerequisites note in output:\n%s", out)
+	}
+	if !strings.Contains(out, "GPG") {
+		t.Errorf("expected GPG mention in note:\n%s", out)
 	}
 }
 

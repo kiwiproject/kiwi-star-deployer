@@ -22,7 +22,7 @@ is tedious and error-prone. `kiwi-star-deployer` automates the full sequence:
 The following tools must be installed and on your PATH before running:
 
 - `git`
-- `gh` (GitHub CLI), authenticated via `gh auth login`
+- `gh` (GitHub CLI) version 2.40.0 or later, authenticated via `gh auth login`
 - `mvn` (Maven)
 - `.generate-kiwi-changelog` (the [kiwiproject changelog script](https://github.com/kiwiproject/kiwiproject-changelog))
 
@@ -356,9 +356,14 @@ Example output:
 ```
 [PASS]  git
 [PASS]  gh
+[PASS]  gh version
 [PASS]  gh auth
 [PASS]  mvn
 [PASS]  .generate-kiwi-changelog
+
+Note: GPG signing and Maven Central publishing credentials cannot be verified
+in advance; mvn release:perform is the first step that exercises them. Ensure
+gpg-agent and ~/.m2/settings.xml are configured before the first release.
 ```
 
 ---
