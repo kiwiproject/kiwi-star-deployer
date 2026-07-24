@@ -16,6 +16,8 @@ const (
 	runListTwo    = `[{"databaseId":1,"status":"queued"},{"databaseId":2,"status":"queued"}]`
 	runListEmpty  = `[]`
 	runInProgress = `{"status":"in_progress","conclusion":""}`
+	workflowsOne  = "1"
+	workflowsNone = "0"
 	runSuccess    = `{"status":"completed","conclusion":"success"}`
 	runFailure    = `{"status":"completed","conclusion":"failure"}`
 	runCancelled  = `{"status":"completed","conclusion":"cancelled"}`
@@ -42,9 +44,10 @@ func TestGHChecker_runFoundImmediatelyAndPasses(t *testing.T) {
 
 func TestGHChecker_runAppearsAfterRetry(t *testing.T) {
 	fr := &runner.FakeRunner{}
-	fr.AddResponse(&runner.Result{Stdout: runListEmpty}, nil) // gh run list (empty)
-	fr.AddResponse(&runner.Result{Stdout: runListOne}, nil)   // gh run list (found)
-	fr.AddResponse(&runner.Result{Stdout: runSuccess}, nil)   // gh run view
+	fr.AddResponse(&runner.Result{Stdout: runListEmpty}, nil)   // gh run list (empty)
+	fr.AddResponse(&runner.Result{Stdout: workflowsOne}, nil)   // gh api workflows (has CI)
+	fr.AddResponse(&runner.Result{Stdout: runListOne}, nil)     // gh run list (found)
+	fr.AddResponse(&runner.Result{Stdout: runSuccess}, nil)     // gh run view
 
 	var buf bytes.Buffer
 	err := newChecker(fr).Wait(&buf, "kiwiproject/kiwi", "abc123def456", time.Minute, time.Millisecond)
@@ -54,8 +57,66 @@ func TestGHChecker_runAppearsAfterRetry(t *testing.T) {
 	if !strings.Contains(buf.String(), "waiting for run to appear") {
 		t.Errorf("expected waiting message in output:\n%s", buf.String())
 	}
-	if fr.CallCount() != 3 {
-		t.Errorf("expected 3 calls, got %d", fr.CallCount())
+	if fr.CallCount() != 4 {
+		t.Errorf("expected 4 calls, got %d", fr.CallCount())
+	}
+}
+
+func TestGHChecker_noActiveWorkflowsSkipsVerification(t *testing.T) {
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: runListEmpty}, nil)  // gh run list (empty)
+	fr.AddResponse(&runner.Result{Stdout: workflowsNone}, nil) // gh api workflows: none
+
+	var buf bytes.Buffer
+	err := newChecker(fr).Wait(&buf, "kiwiproject/kiwi", "abc123def456", time.Minute, time.Millisecond)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fr.CallCount() != 2 {
+		t.Errorf("expected 2 calls, got %d", fr.CallCount())
+	}
+	if !strings.Contains(buf.String(), "no active workflows") {
+		t.Errorf("expected no-active-workflows message in output:\n%s", buf.String())
+	}
+}
+
+func TestGHChecker_workflowCheckRunsOnlyOnce(t *testing.T) {
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: runListEmpty}, nil) // gh run list (empty, cycle 1)
+	fr.AddResponse(&runner.Result{Stdout: workflowsOne}, nil) // gh api workflows (once)
+	fr.AddResponse(&runner.Result{Stdout: runListEmpty}, nil) // gh run list (empty, cycle 2)
+	fr.AddResponse(&runner.Result{Stdout: runListOne}, nil)   // gh run list (found)
+	fr.AddResponse(&runner.Result{Stdout: runSuccess}, nil)   // gh run view
+
+	err := newChecker(fr).Wait(&bytes.Buffer{}, "kiwiproject/kiwi", "abc123def456", time.Minute, time.Millisecond)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	workflowCalls := 0
+	for _, call := range fr.Calls {
+		if strings.Contains(strings.Join(call.Args, " "), "actions/workflows") {
+			workflowCalls++
+		}
+	}
+	if workflowCalls != 1 {
+		t.Errorf("expected exactly 1 workflow check call, got %d", workflowCalls)
+	}
+}
+
+func TestGHChecker_workflowCheckErrorContinuesWaiting(t *testing.T) {
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: runListEmpty}, nil) // gh run list (empty)
+	fr.AddResponse(nil, errors.New("exit status 1"))          // gh api workflows fails
+	fr.AddResponse(&runner.Result{Stdout: runListOne}, nil)   // gh run list (found)
+	fr.AddResponse(&runner.Result{Stdout: runSuccess}, nil)   // gh run view
+
+	var buf bytes.Buffer
+	err := newChecker(fr).Wait(&buf, "kiwiproject/kiwi", "abc123def456", time.Minute, time.Millisecond)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "could not check workflows") {
+		t.Errorf("expected workflow check warning in output:\n%s", buf.String())
 	}
 }
 
@@ -130,6 +191,8 @@ func TestGHChecker_runCancelled(t *testing.T) {
 
 func TestGHChecker_discoveryTimesOut(t *testing.T) {
 	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: runListEmpty}, nil) // first empty poll
+	fr.AddResponse(&runner.Result{Stdout: workflowsOne}, nil) // workflows exist; keep waiting
 	for i := 0; i < 10; i++ {
 		fr.AddResponse(&runner.Result{Stdout: runListEmpty}, nil)
 	}
@@ -196,6 +259,8 @@ func TestGHChecker_viewRunError(t *testing.T) {
 
 func TestGHChecker_shortSHAInMessages(t *testing.T) {
 	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: runListEmpty}, nil) // first empty poll
+	fr.AddResponse(&runner.Result{Stdout: workflowsOne}, nil) // workflows exist; keep waiting
 	for i := 0; i < 10; i++ {
 		fr.AddResponse(&runner.Result{Stdout: runListEmpty}, nil)
 	}

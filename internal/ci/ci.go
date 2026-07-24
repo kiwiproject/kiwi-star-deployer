@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +42,10 @@ func (c *GHChecker) Wait(w io.Writer, repo, commitSHA string, maxWait, interval 
 	known := make(map[int64]struct{})
 	pending := make(map[int64]struct{})
 
+	// checkedWorkflows ensures the active-workflow query runs at most once,
+	// the first time a poll finds no runs.
+	checkedWorkflows := false
+
 	for {
 		if time.Now().After(deadline) {
 			if len(known) == 0 {
@@ -61,6 +66,17 @@ func (c *GHChecker) Wait(w io.Writer, repo, commitSHA string, maxWait, interval 
 		}
 
 		if len(known) == 0 {
+			if !checkedWorkflows {
+				checkedWorkflows = true
+				active, err := c.hasActiveWorkflows(repo)
+				switch {
+				case err != nil:
+					fmt.Fprintf(w, "    CI: could not check workflows for %s (%v); continuing to wait\n", repo, err)
+				case !active:
+					fmt.Fprintf(w, "    CI: %s has no active workflows; skipping CI verification\n", repo)
+					return nil
+				}
+			}
 			fmt.Fprintf(w, "    CI: waiting for run to appear for %s...\n", repo)
 			time.Sleep(interval)
 			continue
@@ -88,6 +104,29 @@ func (c *GHChecker) Wait(w io.Writer, repo, commitSHA string, maxWait, interval 
 
 		time.Sleep(interval)
 	}
+}
+
+// hasActiveWorkflows reports whether repo has any active GitHub Actions
+// workflows. It distinguishes a repo with no CI at all — where there is
+// nothing to wait for and the POM update push will never produce a run —
+// from one whose runs simply have not appeared yet.
+func (c *GHChecker) hasActiveWorkflows(repo string) (bool, error) {
+	result, err := c.Runner.Run(runner.Options{
+		Command: "gh",
+		Args: []string{
+			"api",
+			"repos/" + repo + "/actions/workflows",
+			"--jq", `[.workflows[] | select(.state == "active")] | length`,
+		},
+	})
+	if err != nil {
+		return false, fmt.Errorf("gh api workflows: %w", err)
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(result.Stdout))
+	if err != nil {
+		return false, fmt.Errorf("parsing workflow count %q: %w", strings.TrimSpace(result.Stdout), err)
+	}
+	return count > 0, nil
 }
 
 func (c *GHChecker) listRuns(repo, commitSHA string) ([]int64, error) {
