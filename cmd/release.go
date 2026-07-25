@@ -86,6 +86,7 @@ func runRelease(_ *cobra.Command, _ []string) error {
 		// changelog step — the very step resume's recovery re-runs. Gating a
 		// resume on it would block the recovery that restores the invariant.
 		if !resume {
+			fmt.Fprintf(os.Stderr, "Checking %d %s against GitHub milestones...\n", len(cfg.Libraries), libNoun(len(cfg.Libraries)))
 			cvResults := checkversions.RunAll(r, cfg.Libraries)
 			checkversions.Print(os.Stdout, cvResults)
 			if !checkversions.AllPassed(cvResults) {
@@ -96,6 +97,7 @@ func runRelease(_ *cobra.Command, _ []string) error {
 
 	ws := workspace.New(cfg.Settings.Workspace, r)
 
+	fmt.Fprintf(os.Stderr, "Reading POMs from origin/main (%d %s)...\n", len(cfg.Libraries), libNoun(len(cfg.Libraries)))
 	stages, err := plan.Build(cfg, ws)
 	if err != nil {
 		return err

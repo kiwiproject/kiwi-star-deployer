@@ -22,6 +22,7 @@ func runCheckVersions(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
+	fmt.Fprintf(os.Stderr, "Checking %d %s against GitHub milestones...\n", len(cfg.Libraries), libNoun(len(cfg.Libraries)))
 	results := checkversions.RunAll(runner.NewOsRunner(), cfg.Libraries)
 	checkversions.Print(os.Stdout, results)
 	if !checkversions.AllPassed(results) {

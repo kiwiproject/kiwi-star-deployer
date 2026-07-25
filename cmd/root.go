@@ -43,6 +43,14 @@ func Execute() {
 	}
 }
 
+// libNoun returns "library" or "libraries" for count n.
+func libNoun(n int) string {
+	if n == 1 {
+		return "library"
+	}
+	return "libraries"
+}
+
 func init() {
 	cobra.EnableTraverseRunHooks = true
 	rootCmd.Version = version

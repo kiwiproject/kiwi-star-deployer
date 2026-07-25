@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -141,28 +142,82 @@ func TestRunAll_fetchMilestonesError(t *testing.T) {
 	}
 }
 
+// apiDispatchRunner satisfies runner.Runner and returns responses keyed on
+// the joined argument string, so concurrent checks each get the response for
+// the repo they actually asked about regardless of call ordering. RunAll
+// checks libraries concurrently, so ordered-queue fakes are only safe for
+// single-library tests.
+type apiDispatchRunner struct {
+	responses map[string]*runner.Result
+}
+
+func (r *apiDispatchRunner) Run(opts runner.Options) (*runner.Result, error) {
+	key := strings.Join(opts.Args, " ")
+	if res, ok := r.responses[key]; ok {
+		return res, nil
+	}
+	return nil, fmt.Errorf("apiDispatchRunner: unexpected call: %s %s", opts.Command, key)
+}
+
+func dispatchFor(t *testing.T, repoVersions map[string]string) *apiDispatchRunner {
+	t.Helper()
+	responses := make(map[string]*runner.Result, 2*len(repoVersions))
+	for repo, ver := range repoVersions {
+		responses["api repos/"+repo+"/contents/pom.xml"] = pomResponse(t, ver+"-SNAPSHOT")
+		responses["api repos/"+repo+"/milestones?state=open"] = milestonesResponse(t, ver)
+	}
+	return &apiDispatchRunner{responses: responses}
+}
+
 func TestRunAll_sortedByName(t *testing.T) {
 	libs := map[string]config.Library{
 		"kiwi-test": {Repo: "kiwiproject/kiwi-test"},
 		"kiwi":      {Repo: "kiwiproject/kiwi"},
 	}
-	fr := &runner.FakeRunner{}
-	// kiwi comes first alphabetically
-	fr.AddResponse(pomResponse(t, "2.5.1-SNAPSHOT"), nil)
-	fr.AddResponse(milestonesResponse(t, "2.5.1"), nil)
-	fr.AddResponse(pomResponse(t, "3.0.1-SNAPSHOT"), nil)
-	fr.AddResponse(milestonesResponse(t, "3.0.1"), nil)
+	fr := dispatchFor(t, map[string]string{
+		"kiwiproject/kiwi":      "2.5.1",
+		"kiwiproject/kiwi-test": "3.0.1",
+	})
 
 	results := checkversions.RunAll(fr, libs)
 
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
 	}
-	if results[0].Name != "kiwi" {
-		t.Errorf("expected first result to be kiwi, got %q", results[0].Name)
+	if results[0].Name != "kiwi" || results[0].WantVersion != "2.5.1" {
+		t.Errorf("expected first result kiwi 2.5.1, got %q %q", results[0].Name, results[0].WantVersion)
 	}
-	if results[1].Name != "kiwi-test" {
-		t.Errorf("expected second result to be kiwi-test, got %q", results[1].Name)
+	if results[1].Name != "kiwi-test" || results[1].WantVersion != "3.0.1" {
+		t.Errorf("expected second result kiwi-test 3.0.1, got %q %q", results[1].Name, results[1].WantVersion)
+	}
+}
+
+// TestRunAll_manyLibrariesConcurrently exercises the bounded-concurrency path
+// with more libraries than the concurrency limit; each result must match its
+// own library's responses, and the race detector guards the implementation.
+func TestRunAll_manyLibrariesConcurrently(t *testing.T) {
+	libs := make(map[string]config.Library, 20)
+	repoVersions := make(map[string]string, 20)
+	for i := 0; i < 20; i++ {
+		name := fmt.Sprintf("lib-%02d", i)
+		repo := "kiwiproject/" + name
+		libs[name] = config.Library{Repo: repo}
+		repoVersions[repo] = fmt.Sprintf("1.0.%d", i)
+	}
+	fr := dispatchFor(t, repoVersions)
+
+	results := checkversions.RunAll(fr, libs)
+
+	if len(results) != 20 {
+		t.Fatalf("expected 20 results, got %d", len(results))
+	}
+	for i, r := range results {
+		wantName := fmt.Sprintf("lib-%02d", i)
+		wantVersion := fmt.Sprintf("1.0.%d", i)
+		if r.Name != wantName || !r.OK || r.WantVersion != wantVersion {
+			t.Errorf("result %d: got name=%q ok=%v version=%q, want %q true %q",
+				i, r.Name, r.OK, r.WantVersion, wantName, wantVersion)
+		}
 	}
 }
 

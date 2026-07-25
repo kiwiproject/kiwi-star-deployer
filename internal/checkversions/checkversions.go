@@ -8,12 +8,19 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"sync"
 	"text/tabwriter"
 
 	"github.com/kiwiproject/kiwi-star-deployer/internal/config"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/pom"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/runner"
 )
+
+// maxConcurrentChecks bounds how many libraries are checked at once. Each
+// check makes two gh api calls, so this caps concurrent GitHub requests at
+// twice this value — friendly to API rate limits while collapsing the
+// otherwise fully sequential wall-clock time.
+const maxConcurrentChecks = 8
 
 // Result holds the outcome of a single version check.
 type Result struct {
@@ -23,7 +30,8 @@ type Result struct {
 	Message     string // non-empty on failure
 }
 
-// RunAll checks every library in libs and returns results sorted by library name.
+// RunAll checks every library in libs concurrently (bounded by
+// maxConcurrentChecks) and returns results sorted by library name.
 func RunAll(r runner.Runner, libs map[string]config.Library) []Result {
 	names := make([]string, 0, len(libs))
 	for name := range libs {
@@ -31,10 +39,19 @@ func RunAll(r runner.Runner, libs map[string]config.Library) []Result {
 	}
 	sort.Strings(names)
 
-	results := make([]Result, 0, len(names))
-	for _, name := range names {
-		results = append(results, check(r, name, libs[name].Repo))
+	results := make([]Result, len(names))
+	sem := make(chan struct{}, maxConcurrentChecks)
+	var wg sync.WaitGroup
+	for i, name := range names {
+		wg.Add(1)
+		go func(idx int, name string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			results[idx] = check(r, name, libs[name].Repo)
+		}(i, name)
 	}
+	wg.Wait()
 	return results
 }
 

@@ -26,6 +26,7 @@ func runPlan(_ *cobra.Command, _ []string) error {
 
 	ws := workspace.New(cfg.Settings.Workspace, runner.NewOsRunner())
 
+	fmt.Fprintf(os.Stderr, "Reading POMs from origin/main (%d %s)...\n", len(cfg.Libraries), libNoun(len(cfg.Libraries)))
 	stages, err := plan.Build(cfg, ws)
 	if err != nil {
 		return err
