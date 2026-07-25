@@ -338,6 +338,11 @@ repos missing from the workspace are cloned first and existing clones are
 fetched, but local working copies are never modified and nothing is pushed or
 released. Useful for verifying the dependency graph before a release.
 
+Note that `plan` derives everything from POMs and deliberately does not check
+GitHub milestones, so a clean plan can still be blocked by the milestone gate
+when `release` runs. Run [check-versions](#check-versions) alongside `plan` to
+verify milestone state ahead of time; `release` runs it automatically.
+
 ```sh
 kiwi-star-deployer plan
 ```

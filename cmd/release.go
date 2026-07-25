@@ -107,6 +107,7 @@ func runRelease(_ *cobra.Command, _ []string) error {
 
 	if dryRun {
 		plan.Print(os.Stdout, stages)
+		printMilestoneNote(os.Stdout)
 		return nil
 	}
 
