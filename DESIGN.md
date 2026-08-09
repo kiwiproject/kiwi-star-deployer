@@ -1,5 +1,10 @@
 # kiwi-star-deployer — Design Document
 
+> **Historical artifact.** This is the original design document, preserved as
+> written. The implementation has evolved past it in places, and this document
+> is not updated to track those changes — see [README.md](README.md) for
+> current behavior.
+
 ## Purpose
 
 `kiwi-star-deployer` is a Go CLI tool that automates the release of kiwiproject libraries
