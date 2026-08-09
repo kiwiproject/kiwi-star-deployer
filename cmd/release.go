@@ -43,8 +43,8 @@ func runRelease(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	if len(skipLibs) > 0 && !resume {
-		return fmt.Errorf("--skip requires --resume")
+	if err := validateReleaseFlags(resume, noAutoSkip, skipLibs); err != nil {
+		return err
 	}
 	for _, name := range skipLibs {
 		if _, ok := cfg.Libraries[name]; !ok {
@@ -185,6 +185,22 @@ func runRelease(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
+// validateReleaseFlags rejects flag combinations that undermine each other.
+// --no-auto-skip with --resume is forbidden because the recovery paths for a
+// library that failed at maven-central-verify or changelog are only reachable
+// through auto-skip detection: with it disabled, a resumed run would perform a
+// full new Maven release at the next version (the POM is already bumped) on
+// top of the unrecorded previous one, orphaning its changelog and milestone.
+func validateReleaseFlags(resume, noAutoSkip bool, skipLibs []string) error {
+	if len(skipLibs) > 0 && !resume {
+		return fmt.Errorf("--skip requires --resume")
+	}
+	if resume && noAutoSkip {
+		return fmt.Errorf("--no-auto-skip cannot be combined with --resume: resume recovery relies on auto-skip to verify already-released libraries (resume without it, then force any still-unchanged libraries with --no-auto-skip --only <libs>)")
+	}
+	return nil
+}
+
 // autoPurgeLogs deletes run log directories older than retentionDays without
 // prompting, except excludeDir, which is always kept regardless of age — this
 // run's own directory, which can look "old" by name if the run was resumed
@@ -230,7 +246,7 @@ func init() {
 	releaseCmd.Flags().StringSliceVar(&onlyLibs, "only", nil, "release only these libraries (comma-separated)")
 	releaseCmd.Flags().StringArrayVar(&summaryFlags, "summary", nil, "prepend summary text to changelog for a library (libname=text, repeatable)")
 	releaseCmd.Flags().StringArrayVar(&summaryFileFlags, "summary-file", nil, "prepend summary file to changelog for a library (libname=/path, repeatable)")
-	releaseCmd.Flags().BoolVar(&noAutoSkip, "no-auto-skip", false, "release all libraries even if unchanged since last release")
+	releaseCmd.Flags().BoolVar(&noAutoSkip, "no-auto-skip", false, "release all libraries even if unchanged since last release (cannot be combined with --resume)")
 }
 
 func parseSummaryFlags(flags []string, libs map[string]config.Library) (map[string]string, error) {

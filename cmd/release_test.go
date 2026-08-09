@@ -17,6 +17,49 @@ var testLibs = map[string]config.Library{
 	"kiwi-parent": {Repo: "kiwiproject/kiwi-parent"},
 }
 
+func TestValidateReleaseFlags(t *testing.T) {
+	tests := []struct {
+		name       string
+		resume     bool
+		noAutoSkip bool
+		skipLibs   []string
+		wantErr    string
+	}{
+		{name: "no flags"},
+		{name: "resume alone", resume: true},
+		{name: "no-auto-skip alone", noAutoSkip: true},
+		{name: "resume with skip", resume: true, skipLibs: []string{"kiwi"}},
+		{
+			name:     "skip without resume",
+			skipLibs: []string{"kiwi"},
+			wantErr:  "--skip requires --resume",
+		},
+		{
+			name:       "resume with no-auto-skip",
+			resume:     true,
+			noAutoSkip: true,
+			wantErr:    "--no-auto-skip cannot be combined with --resume",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateReleaseFlags(tt.resume, tt.noAutoSkip, tt.skipLibs)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("expected %q in error, got: %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
 func TestParseSummaryFlags(t *testing.T) {
 	tests := []struct {
 		name    string

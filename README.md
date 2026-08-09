@@ -260,7 +260,7 @@ kiwi-star-deployer release [flags]
 | `--skip <lib>` | Treat a library as already released; requires `--resume` (repeatable) |
 | `--summary <libname=text>` | Prepend inline summary text to the changelog for a library (repeatable) |
 | `--summary-file <libname=/path>` | Prepend the contents of a file as a summary to the changelog for a library (repeatable) |
-| `--no-auto-skip` | Release every library, even ones with no changes since their last release |
+| `--no-auto-skip` | Release every library, even ones with no changes since their last release (cannot be combined with `--resume`) |
 
 Before touching anything, `release` runs the same checks as `preflight`
 and `check-versions` and refuses to start if any fail (both are skipped
@@ -289,7 +289,13 @@ new to release. A skipped library still has its Maven Central
 availability verified, and if the GitHub release for its tag is missing
 (a previous run failed between publishing and the changelog step), the
 changelog step is run for the already-released version. Pass
-`--no-auto-skip` to force every library to release regardless.
+`--no-auto-skip` to force every library to release regardless. Because
+resume recovery depends on this auto-skip detection, `--no-auto-skip`
+cannot be combined with `--resume`: a resumed run with it disabled would
+release a new version on top of an unrecorded previous one. If a
+`--no-auto-skip` run fails partway, resume it normally — forced releases
+of still-unchanged libraries are skipped — and afterwards force just
+those libraries with a fresh `release --no-auto-skip --only <libs>`.
 
 The Maven release build itself runs with tests skipped
 (`-Darguments=-DskipTests`); each repository's CI is the quality gate.
