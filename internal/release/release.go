@@ -181,7 +181,10 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 
 // buildSkipVersions merges opts.Completed and opts.Skip into a single map of
 // library name → released version. For Skip entries not already in Completed,
-// the version is read from the latest git tag in the workspace.
+// the version is read from the latest tag reachable from origin/main. The
+// remote-tracking ref is used rather than the workspace HEAD because Prepare
+// never runs for a skipped library, so its HEAD can predate a manual release;
+// origin/main is current because plan.Build fetches every library first.
 func buildSkipVersions(opts Options, ws *workspace.Workspace, r runner.Runner) (map[string]string, error) {
 	if len(opts.Completed) == 0 && len(opts.Skip) == 0 {
 		return nil, nil
@@ -194,15 +197,10 @@ func buildSkipVersions(opts Options, ws *workspace.Workspace, r runner.Runner) (
 		if _, already := skip[name]; already {
 			continue
 		}
-		result, err := r.Run(runner.Options{
-			Command:    "git",
-			Args:       []string{"describe", "--tags", "--abbrev=0"},
-			WorkingDir: ws.RepoDir(name),
-		})
+		v, err := latestReachableTag(r, ws.RepoDir(name), "origin/main")
 		if err != nil {
 			return nil, fmt.Errorf("resolving version for --skip %q: %w", name, err)
 		}
-		v := strings.TrimPrefix(strings.TrimSpace(result.Stdout), "v")
 		if "v"+v == syntheticBaselineTag {
 			return nil, fmt.Errorf("--skip %q: latest tag is the synthetic changelog baseline %s; the library has never been released", name, syntheticBaselineTag)
 		}
@@ -483,18 +481,28 @@ func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, 
 // release's changelog to the full history.
 const syntheticBaselineTag = "v0.0.0"
 
+// latestReachableTag returns the most recent tag reachable from ref, stripped
+// of its v prefix.
+func latestReachableTag(r runner.Runner, repoDir, ref string) (string, error) {
+	result, err := r.Run(runner.Options{
+		Command:    "git",
+		Args:       []string{"describe", "--tags", "--abbrev=0", ref},
+		WorkingDir: repoDir,
+	})
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimPrefix(strings.TrimSpace(result.Stdout), "v"), nil
+}
+
 // ensurePreviousReleaseTag returns the most recent release tag reachable from
 // ref, stripped of its v prefix. When no tag is reachable — the first release
 // of a library — it creates the synthetic annotated baseline tag at the
 // repository's root commit and pushes it, then returns that tag's version.
 func ensurePreviousReleaseTag(r runner.Runner, repoDir, ref string) (string, error) {
-	result, describeErr := r.Run(runner.Options{
-		Command:    "git",
-		Args:       []string{"describe", "--tags", "--abbrev=0", ref},
-		WorkingDir: repoDir,
-	})
+	v, describeErr := latestReachableTag(r, repoDir, ref)
 	if describeErr == nil {
-		return strings.TrimPrefix(strings.TrimSpace(result.Stdout), "v"), nil
+		return v, nil
 	}
 	rootResult, err := r.Run(runner.Options{
 		Command:    "git",

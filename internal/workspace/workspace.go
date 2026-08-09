@@ -131,10 +131,15 @@ func (w *Workspace) verifyClean(dir, name string) error {
 	return nil
 }
 
+// fetch updates remote-tracking refs and all tags. --tags matters: a plain
+// fetch only auto-follows tags pointing at newly downloaded objects, so a tag
+// created on an already-fetched commit (e.g. a release made via the GitHub UI)
+// would otherwise never arrive, and --skip version resolution depends on the
+// latest release tag being present locally.
 func (w *Workspace) fetch(dir, name string) error {
 	if _, err := w.runner.Run(runner.Options{
 		Command:    "git",
-		Args:       []string{"fetch", "origin"},
+		Args:       []string{"fetch", "--tags", "origin"},
 		WorkingDir: dir,
 	}); err != nil {
 		return fmt.Errorf("%s: git fetch: %w", name, err)

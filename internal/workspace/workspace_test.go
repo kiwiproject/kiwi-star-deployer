@@ -89,8 +89,8 @@ func TestReadFile_fetchesThenShowsRemoteRef(t *testing.T) {
 		t.Fatalf("expected 2 runner calls, got %d: %v", fr.CallCount(), fr.Calls)
 	}
 	fetchCall := fr.Calls[0]
-	if fetchCall.Command != "git" || strings.Join(fetchCall.Args, " ") != "fetch origin" {
-		t.Errorf("expected git fetch origin, got %v", fetchCall)
+	if fetchCall.Command != "git" || strings.Join(fetchCall.Args, " ") != "fetch --tags origin" {
+		t.Errorf("expected git fetch --tags origin, got %v", fetchCall)
 	}
 	showCall := fr.Calls[1]
 	if showCall.Command != "git" || strings.Join(showCall.Args, " ") != "show origin/main:pom.xml" {

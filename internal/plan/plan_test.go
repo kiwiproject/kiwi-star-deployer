@@ -16,7 +16,7 @@ import (
 )
 
 // gitShowFromDiskRunner satisfies runner.Runner and simulates ws.ReadFile
-// without a real git remote: `git fetch origin` is a no-op success, and
+// without a real git remote: `git fetch --tags origin` is a no-op success, and
 // `git show origin/main:<path>` returns the contents of <path> as it exists
 // on disk under WorkingDir. This lets tests write a pom.xml via createRepo /
 // createRepoWithProperties and have Build "read it from origin/main" the same
@@ -25,7 +25,7 @@ import (
 type gitShowFromDiskRunner struct{}
 
 func (r *gitShowFromDiskRunner) Run(opts runner.Options) (*runner.Result, error) {
-	if opts.Command == "git" && len(opts.Args) == 2 && opts.Args[0] == "fetch" {
+	if opts.Command == "git" && opts.Args[0] == "fetch" {
 		return &runner.Result{}, nil
 	}
 	if opts.Command == "git" && len(opts.Args) == 2 && opts.Args[0] == "show" {

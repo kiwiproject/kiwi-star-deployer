@@ -609,6 +609,12 @@ func TestExecute_skipResolvesVersionFromGitTag(t *testing.T) {
 	if fr.CallCount() != 4 {
 		t.Errorf("expected 4 runner calls, got %d", fr.CallCount())
 	}
+	// The skipped library's clone is never Prepared, so its HEAD can predate a
+	// manual release; the version must be resolved from origin/main instead.
+	describeArgs := strings.Join(fr.Calls[0].Args, " ")
+	if describeArgs != "describe --tags --abbrev=0 origin/main" {
+		t.Errorf("expected describe against origin/main, got: %s", describeArgs)
+	}
 }
 
 func TestExecute_skippedVersionUsedInPOMUpdate(t *testing.T) {
