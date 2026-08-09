@@ -257,7 +257,7 @@ kiwi-star-deployer release [flags]
 | `--dry-run` | Print the release plan without executing any steps |
 | `--only <libs>` | Release only the named libraries (comma-separated or repeated) |
 | `--resume` | Resume a previously failed run, skipping already-completed libraries |
-| `--skip <lib>` | Treat a library as already released; requires `--resume` (repeatable) |
+| `--skip <lib>` | Treat a library as already released; requires `--resume` (repeatable). The version is resolved from the latest release tag and verified to exist on Maven Central |
 | `--summary <libname=text>` | Prepend inline summary text to the changelog for a library (repeatable) |
 | `--summary-file <libname=/path>` | Prepend the contents of a file as a summary to the changelog for a library (repeatable) |
 | `--no-auto-skip` | Release every library, even ones with no changes since their last release (cannot be combined with `--resume`) |
@@ -319,6 +319,13 @@ Resume after a failure, treating a manually-released library as done:
 ```sh
 kiwi-star-deployer release --resume --skip kiwi-test
 ```
+
+`--skip` asserts that the library's release already succeeded: the
+version is taken from its latest release tag and must exist on Maven
+Central, otherwise the run refuses to start. To recover a library whose
+release *failed*, resume without `--skip` — auto-skip detection verifies
+Maven Central and re-runs the changelog step as needed, which `--skip`
+would bypass.
 
 Major release with per-library changelog summaries:
 

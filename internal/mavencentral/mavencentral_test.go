@@ -19,6 +19,35 @@ func TestArtifactURL(t *testing.T) {
 	}
 }
 
+func TestAvailable_distinguishesFoundAbsentAndError(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    int
+		wantFound bool
+		wantErr   bool
+	}{
+		{name: "found", status: http.StatusOK, wantFound: true},
+		{name: "definitely absent", status: http.StatusNotFound},
+		{name: "server error is not absence", status: http.StatusServiceUnavailable, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.status)
+			}))
+			defer ts.Close()
+
+			found, err := mavencentral.NewWithBaseURL(ts.URL).Available("org.kiwiproject", "kiwi", "2.5.1")
+			if found != tt.wantFound {
+				t.Errorf("found: got %v, want %v", found, tt.wantFound)
+			}
+			if (err != nil) != tt.wantErr {
+				t.Errorf("err: got %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestWait_availableImmediately(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

@@ -31,10 +31,21 @@ func (r *prepareSuccessRunner) Run(opts runner.Options) (*runner.Result, error) 
 	return &runner.Result{}, nil
 }
 
-type fakeCentral struct{ err error }
+type fakeCentral struct {
+	err          error // returned by Wait
+	notFound     bool  // Available reports definite absence
+	availableErr error // Available fails to determine presence
+}
 
 func (f *fakeCentral) Wait(_ io.Writer, _, _, _ string, _, _ time.Duration) error {
 	return f.err
+}
+
+func (f *fakeCentral) Available(_, _, _ string) (bool, error) {
+	if f.availableErr != nil {
+		return false, f.availableErr
+	}
+	return !f.notFound, nil
 }
 
 type fakeCIChecker struct{ err error }
@@ -614,6 +625,91 @@ func TestExecute_skipResolvesVersionFromGitTag(t *testing.T) {
 	describeArgs := strings.Join(fr.Calls[0].Args, " ")
 	if describeArgs != "describe --tags --abbrev=0 origin/main" {
 		t.Errorf("expected describe against origin/main, got: %s", describeArgs)
+	}
+}
+
+func TestExecute_skipFailsWhenVersionNotOnCentral(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: "v3.0.0\n"}, nil) // git describe for kiwi-parent (--skip)
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	opts := defaultOpts()
+	opts.Skip = []string{"kiwi-parent"}
+	opts.Checker = &fakeCentral{notFound: true}
+
+	err := release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), opts)
+	if err == nil {
+		t.Fatal("expected error when skipped version is not on Maven Central, got nil")
+	}
+	if !strings.Contains(err.Error(), `--skip "kiwi-parent": version 3.0.0 is not on Maven Central`) {
+		t.Errorf("expected Central verification message in error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "use plain --resume instead") {
+		t.Errorf("expected recovery hint in error: %v", err)
+	}
+	// Verification failed before any release work: only the describe call ran.
+	if fr.CallCount() != 1 {
+		t.Errorf("expected 1 runner call (git describe), got %d", fr.CallCount())
+	}
+}
+
+func TestExecute_skipVerificationTransientErrorIsDistinct(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: "v3.0.0\n"}, nil) // git describe for kiwi-parent (--skip)
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+	)
+
+	opts := defaultOpts()
+	opts.Skip = []string{"kiwi-parent"}
+	opts.Checker = &fakeCentral{availableErr: errors.New("HTTP 503")}
+
+	err := release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), opts)
+	if err == nil {
+		t.Fatal("expected error when Central check fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "could not verify version 3.0.0 on Maven Central") {
+		t.Errorf("expected could-not-verify message in error: %v", err)
+	}
+	if strings.Contains(err.Error(), "is not on Maven Central;") {
+		t.Errorf("transient failure must not claim the version is absent: %v", err)
+	}
+}
+
+func TestExecute_skipOutsideStagesIsIgnored(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.5.0") // kiwi: git describe, mvn, changelog
+
+	// kiwi-parent was excluded by --only, so it is absent from stages; its
+	// --skip entry must not be resolved or verified (the checker would fail).
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	opts := defaultOpts()
+	opts.Skip = []string{"kiwi-parent"}
+	opts.Checker = &fakeCentral{notFound: true}
+
+	if err := release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Only kiwi's release calls ran; no describe for the ignored skip entry.
+	if fr.CallCount() != 3 {
+		t.Errorf("expected 3 runner calls (kiwi release only), got %d", fr.CallCount())
 	}
 }
 

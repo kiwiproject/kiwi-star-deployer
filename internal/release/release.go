@@ -21,6 +21,10 @@ import (
 // CentralChecker verifies that a released artifact is available in Maven Central.
 type CentralChecker interface {
 	Wait(w io.Writer, groupID, artifactID, version string, maxWait, interval time.Duration) error
+	// Available performs a single existence check without polling. found
+	// reports presence (true) or definite absence (false); a non-nil error
+	// means presence could not be determined.
+	Available(groupID, artifactID, version string) (found bool, err error)
 }
 
 // CIChecker verifies that GitHub Actions CI passes after a downstream POM update push.
@@ -106,7 +110,7 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 	}
 	fmt.Fprintf(w, "Logs: %s\n\n", logDir)
 
-	skipVersions, err := buildSkipVersions(opts, ws, r)
+	skipVersions, err := buildSkipVersions(w, opts, stages, ws, r)
 	if err != nil {
 		return err
 	}
@@ -185,16 +189,29 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 // remote-tracking ref is used rather than the workspace HEAD because Prepare
 // never runs for a skipped library, so its HEAD can predate a manual release;
 // origin/main is current because plan.Build fetches every library first.
-func buildSkipVersions(opts Options, ws *workspace.Workspace, r runner.Runner) (map[string]string, error) {
+// Each resolved version is then verified to exist on Maven Central: --skip
+// asserts "this library's release already succeeded", and treating a
+// never-released library as completed would silently feed its old version to
+// every downstream POM. Completed entries are not re-verified — their runs
+// already did. Skip entries not present in stages (excluded by --only) are
+// ignored entirely: their versions are never consulted, so resolving and
+// verifying them could only add spurious failures.
+func buildSkipVersions(w io.Writer, opts Options, stages [][]plan.Entry, ws *workspace.Workspace, r runner.Runner) (map[string]string, error) {
 	if len(opts.Completed) == 0 && len(opts.Skip) == 0 {
 		return nil, nil
+	}
+	staged := make(map[string]bool)
+	for _, stage := range stages {
+		for _, e := range stage {
+			staged[e.Name] = true
+		}
 	}
 	skip := make(map[string]string, len(opts.Completed)+len(opts.Skip))
 	for name, ver := range opts.Completed {
 		skip[name] = ver
 	}
 	for _, name := range opts.Skip {
-		if _, already := skip[name]; already {
+		if _, already := skip[name]; already || !staged[name] {
 			continue
 		}
 		v, err := latestReachableTag(r, ws.RepoDir(name), "origin/main")
@@ -203,6 +220,14 @@ func buildSkipVersions(opts Options, ws *workspace.Workspace, r runner.Runner) (
 		}
 		if "v"+v == syntheticBaselineTag {
 			return nil, fmt.Errorf("--skip %q: latest tag is the synthetic changelog baseline %s; the library has never been released", name, syntheticBaselineTag)
+		}
+		fmt.Fprintf(w, "Verifying --skip %s %s on Maven Central...\n", name, v)
+		found, err := opts.Checker.Available(opts.GroupID, name, v)
+		if err != nil {
+			return nil, fmt.Errorf("--skip %q: could not verify version %s on Maven Central: %w (this may be transient; retry, or check %s manually)", name, v, err, name)
+		}
+		if !found {
+			return nil, fmt.Errorf("--skip %q: version %s is not on Maven Central; --skip is only for libraries whose release already succeeded — to recover a failed release, use plain --resume instead", name, v)
 		}
 		skip[name] = v
 	}
