@@ -37,8 +37,15 @@ func validate(cfg *Config) error {
 				errs = append(errs, fmt.Sprintf("library %q: depends on itself", name))
 				continue
 			}
-			if _, ok := cfg.Libraries[dep]; !ok {
+			depLib, ok := cfg.Libraries[dep]
+			if !ok {
 				errs = append(errs, fmt.Sprintf("library %q: unknown dependency %q", name, dep))
+				continue
+			}
+			// The library-bom is always released last via synthetic graph
+			// edges; libraries downstream of it are outside this tool's scope.
+			if depLib.Type == TypeLibraryBOM {
+				errs = append(errs, fmt.Sprintf("library %q: depends on the library-bom %q; libraries that depend on the BOM are not supported", name, dep))
 			}
 		}
 	}

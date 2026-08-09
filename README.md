@@ -170,7 +170,7 @@ Duration values use Go duration syntax: `30s`, `5m`, `1h30m`.
 | (unset) | Regular library |
 | `parent-pom` | Maven parent POM |
 | `bom` | Bill of Materials POM |
-| `library-bom` | Library-managed BOM; at most one per config |
+| `library-bom` | Library-managed BOM; at most one per config, always released last, and no library may list it in `depends_on` |
 
 > [!WARNING]
 > Every library whose POM is updated by this tool (all non-`parent-pom` types)
@@ -277,8 +277,10 @@ config against each library's actual POM: any dependency in the POM
 `group_id` and whose artifactId names another configured library must be
 listed in that library's `depends_on`. A missing edge would silently
 corrupt release ordering, so it fails the plan before anything is
-released. The `library-bom` type is exempt since it intentionally
-references every library and is always released last.
+released. This applies to the `library-bom` too, where the stakes are
+highest: an artifact managed in the BOM's POM but missing from its
+`depends_on` would never get its version property bumped, so the BOM
+would be released pointing at a stale version.
 
 Libraries with no changes since their last release are skipped
 automatically: if a library's two most recent commits are the

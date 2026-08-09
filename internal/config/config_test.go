@@ -202,6 +202,19 @@ type = "library-bom"
 			wantErr: `at most one library may have type "library-bom"`,
 		},
 		{
+			name: "dependency on the library-bom",
+			content: `
+[library.kiwi-libraries-bom]
+repo = "kiwiproject/kiwi-libraries-bom"
+type = "library-bom"
+
+[library.elucidation]
+repo = "kiwiproject/elucidation"
+depends_on = ["kiwi-libraries-bom"]
+`,
+			wantErr: "libraries that depend on the BOM are not supported",
+		},
+		{
 			name: "missing repo",
 			content: `
 [library.kiwi]

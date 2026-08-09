@@ -80,22 +80,24 @@ func TestStages_libraryBOMLastAmongCoreLibs(t *testing.T) {
 	})
 }
 
-func TestStages_libraryBOMBeforeDownstreamLibs(t *testing.T) {
-	// elucidation depends on kiwi-libraries-bom, so it is already downstream
-	// and must NOT receive a synthetic edge (that would create a cycle).
+func TestStages_libraryDependingOnBOMIsCycle(t *testing.T) {
+	// Libraries downstream of the library-bom are rejected by config
+	// validation; if such a config somehow reaches the graph, the synthetic
+	// edge to the BOM plus the declared edge from it form a cycle, so the
+	// sort fails loudly rather than producing a wrong order.
 	libs := map[string]config.Library{
 		"kiwi-parent":        {Repo: "kiwiproject/kiwi-parent", Type: "parent-pom"},
 		"kiwi":               {Repo: "kiwiproject/kiwi", DependsOn: []string{"kiwi-parent"}},
 		"kiwi-libraries-bom": {Repo: "kiwiproject/kiwi-libraries-bom", Type: "library-bom", DependsOn: []string{"kiwi"}},
 		"elucidation":        {Repo: "elucidation-project/elucidation", DependsOn: []string{"kiwi-libraries-bom"}},
 	}
-	stages := mustStages(t, libs)
-	assertStages(t, stages, [][]string{
-		{"kiwi-parent"},
-		{"kiwi"},
-		{"kiwi-libraries-bom"},
-		{"elucidation"},
-	})
+	_, err := graph.New(libs).Stages()
+	if err == nil {
+		t.Fatal("expected cycle error for library depending on the BOM, got nil")
+	}
+	if !strings.Contains(err.Error(), "cycle") {
+		t.Errorf("expected cycle error, got: %v", err)
+	}
 }
 
 func TestStages_libraryBOMWithNoDeclaredDeps(t *testing.T) {

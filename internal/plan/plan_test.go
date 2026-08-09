@@ -589,26 +589,34 @@ func TestBuild_dependsOnMatchesProjectGroupIdExpression(t *testing.T) {
 	}
 }
 
-func TestBuild_libraryBOMExemptFromDependsOnValidation(t *testing.T) {
-	dir, ws := makeWorkspace(t)
-	createRepo(t, dir, "kiwi", "4.0.0-SNAPSHOT")
-	// kiwi-libraries-bom manages versions of every library without declaring
-	// them in depends_on; synthetic graph edges already release it last.
-	createRepoWithPOM(t, dir, "kiwi-libraries-bom", `<?xml version="1.0" encoding="UTF-8"?>
+// libraryBOMPOM is a minimal library-bom pom.xml managing kiwi's version via
+// the kiwi.version property, as the real BOM does.
+const libraryBOMPOM = `<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0">
     <modelVersion>4.0.0</modelVersion>
     <artifactId>kiwi-libraries-bom</artifactId>
     <version>2.0.0-SNAPSHOT</version>
+    <properties>
+        <kiwi.version>4.0.0</kiwi.version>
+    </properties>
     <dependencyManagement>
         <dependencies>
             <dependency>
                 <groupId>org.kiwiproject</groupId>
                 <artifactId>kiwi</artifactId>
-                <version>4.0.0</version>
+                <version>${kiwi.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
-</project>`)
+</project>`
+
+func TestBuild_libraryBOMDependsOnDriftFails(t *testing.T) {
+	dir, ws := makeWorkspace(t)
+	createRepo(t, dir, "kiwi", "4.0.0-SNAPSHOT")
+	// The BOM manages kiwi but does not declare it in depends_on. This is the
+	// case where drift matters most: an undeclared artifact's version property
+	// is never bumped during a release, so the BOM would ship a stale version.
+	createRepoWithPOM(t, dir, "kiwi-libraries-bom", libraryBOMPOM)
 
 	cfg := &config.Config{
 		Settings: config.Settings{Workspace: dir, GroupID: "org.kiwiproject"},
@@ -618,8 +626,73 @@ func TestBuild_libraryBOMExemptFromDependsOnValidation(t *testing.T) {
 		},
 	}
 
+	_, err := plan.Build(cfg, ws)
+	if err == nil {
+		t.Fatal("expected depends_on drift error for library-bom, got nil")
+	}
+	if !strings.Contains(err.Error(), "kiwi-libraries-bom: pom.xml depends on kiwi but depends_on does not list it") {
+		t.Errorf("expected drift message in error: %v", err)
+	}
+}
+
+func TestBuild_libraryBOMDependsOnDeclaredPasses(t *testing.T) {
+	dir, ws := makeWorkspace(t)
+	createRepo(t, dir, "kiwi", "4.0.0-SNAPSHOT")
+	createRepoWithPOM(t, dir, "kiwi-libraries-bom", libraryBOMPOM)
+
+	cfg := &config.Config{
+		Settings: config.Settings{Workspace: dir, GroupID: "org.kiwiproject"},
+		Libraries: map[string]config.Library{
+			"kiwi":               {Repo: "kiwiproject/kiwi"},
+			"kiwi-libraries-bom": {Repo: "kiwiproject/kiwi-libraries-bom", Type: "library-bom", DependsOn: []string{"kiwi"}},
+		},
+	}
+
 	if _, err := plan.Build(cfg, ws); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBuild_pomReferencingLibraryBOMFails(t *testing.T) {
+	dir, ws := makeWorkspace(t)
+	createRepo(t, dir, "kiwi", "4.0.0-SNAPSHOT")
+	createRepoWithPOM(t, dir, "kiwi-libraries-bom", libraryBOMPOM)
+	// elucidation-style library: imports the BOM in its POM. The error must
+	// state the scope constraint, not tell the user to add a depends_on edge
+	// that config validation would then reject.
+	createRepoWithPOM(t, dir, "elucidation", `<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <artifactId>elucidation</artifactId>
+    <version>1.5.0-SNAPSHOT</version>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.kiwiproject</groupId>
+                <artifactId>kiwi-libraries-bom</artifactId>
+                <version>2.0.0</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+</project>`)
+
+	cfg := &config.Config{
+		Settings: config.Settings{Workspace: dir, GroupID: "org.kiwiproject"},
+		Libraries: map[string]config.Library{
+			"kiwi":               {Repo: "kiwiproject/kiwi"},
+			"elucidation":        {Repo: "kiwiproject/elucidation"},
+			"kiwi-libraries-bom": {Repo: "kiwiproject/kiwi-libraries-bom", Type: "library-bom", DependsOn: []string{"kiwi"}},
+		},
+	}
+
+	_, err := plan.Build(cfg, ws)
+	if err == nil {
+		t.Fatal("expected error for POM referencing the library-bom, got nil")
+	}
+	if !strings.Contains(err.Error(), "elucidation: pom.xml references the library-bom kiwi-libraries-bom; libraries that depend on the BOM are not supported") {
+		t.Errorf("expected unsupported-reference message in error: %v", err)
 	}
 }
 

@@ -10,7 +10,9 @@ import (
 
 // Graph is a directed dependency graph of libraries.
 // Callers must ensure all DependsOn entries reference libraries present in the
-// map passed to New (config.Load guarantees this).
+// map passed to New, and that no library lists a library-bom in its DependsOn
+// (config validation guarantees both). A map violating the latter makes the
+// synthetic edge below close a loop, so Stages reports a dependency cycle.
 type Graph struct {
 	nodes      []string            // all node names, sorted for deterministic output
 	successors map[string][]string // successors[A] = libs that must come after A
@@ -18,10 +20,10 @@ type Graph struct {
 }
 
 // New builds a dependency graph from the given library map. If a library with
-// type "library-bom" is present, synthetic dependency edges are added from
-// every non-library-bom, non-downstream library to it. This ensures it appears
-// after all core libraries in the sort while still allowing libraries that
-// depend on it (e.g. elucidation) to follow naturally.
+// type "library-bom" is present, a synthetic dependency edge is added from
+// every other library to it, so it is always released last. A duplicate of an
+// edge the BOM's own DependsOn already declares is harmless: the topological
+// sort increments and decrements such an edge symmetrically.
 func New(libs map[string]config.Library) *Graph {
 	g := &Graph{
 		successors: make(map[string][]string, len(libs)),
@@ -43,11 +45,8 @@ func New(libs map[string]config.Library) *Graph {
 	}
 
 	if agg := findLibraryBOM(libs); agg != "" {
-		downstream := reachableFrom(g.successors, agg)
-		aggDeps := toSet(libs[agg].DependsOn)
-
 		for _, name := range g.nodes {
-			if name == agg || downstream[name] || aggDeps[name] {
+			if name == agg {
 				continue
 			}
 			g.successors[name] = append(g.successors[name], agg)
@@ -104,31 +103,6 @@ func findLibraryBOM(libs map[string]config.Library) string {
 		}
 	}
 	return ""
-}
-
-// reachableFrom returns all nodes reachable from start by following successors
-// (not including start itself).
-func reachableFrom(successors map[string][]string, start string) map[string]bool {
-	visited := make(map[string]bool)
-	queue := append([]string(nil), successors[start]...)
-	for len(queue) > 0 {
-		node := queue[0]
-		queue = queue[1:]
-		if visited[node] {
-			continue
-		}
-		visited[node] = true
-		queue = append(queue, successors[node]...)
-	}
-	return visited
-}
-
-func toSet(items []string) map[string]bool {
-	s := make(map[string]bool, len(items))
-	for _, item := range items {
-		s[item] = true
-	}
-	return s
 }
 
 func cycleError(remaining map[string]bool) error {

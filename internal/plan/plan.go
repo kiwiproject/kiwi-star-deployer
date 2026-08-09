@@ -24,11 +24,6 @@ type Entry struct {
 	VersionPlan version.Plan
 }
 
-// IsLibraryBOM reports whether this entry is a library-bom.
-func (e Entry) IsLibraryBOM() bool {
-	return e.Type == config.TypeLibraryBOM
-}
-
 // Build constructs the full release plan. It clones any repos not yet present
 // in the workspace, then reads each library's pom.xml directly from
 // origin/main (never touching the local working copy), and computes release
@@ -142,15 +137,17 @@ func buildEntry(cfg *config.Config, ws *workspace.Workspace, name string, stageN
 // dependencyManagement entries) whose groupId matches the configured group
 // and whose artifactId names another configured library must be listed in
 // lib's depends_on. A missing edge silently corrupts release ordering, which
-// is exactly what the explicit config exists to prevent. The library-bom
-// type is exempt: its POM intentionally references every library, and
-// synthetic graph edges already force it to release last. The reverse
-// direction — an edge declared in depends_on but absent from the POM — only
-// makes staging more conservative and is not flagged.
+// is exactly what the explicit config exists to prevent. This applies to the
+// library-bom too — there the stakes are highest: a managed artifact missing
+// from its depends_on never gets its version property bumped during the run,
+// so the BOM would be released pointing at a stale version. (The bump itself
+// relies on the kiwiproject convention that managed entries reference the
+// <artifactId>.version property; a literal version is not detected here.)
+// The reverse direction — an edge declared in depends_on but absent from the
+// POM — only makes staging more conservative and is not flagged. A POM
+// reference to the library-bom itself is reported as unsupported rather than
+// as a missing edge, since config validation forbids declaring that edge.
 func validateDependsOn(name string, lib config.Library, cfg *config.Config, pomContent string) ([]string, error) {
-	if lib.Type == config.TypeLibraryBOM {
-		return nil, nil
-	}
 	deps, err := pom.ParseDependencies(strings.NewReader(pomContent))
 	if err != nil {
 		return nil, fmt.Errorf("reading POM dependencies for %s: %w", name, err)
@@ -169,10 +166,18 @@ func validateDependsOn(name string, lib config.Library, cfg *config.Config, pomC
 		if !groupMatches || dep.ArtifactID == name || seen[dep.ArtifactID] {
 			continue
 		}
-		if _, configured := cfg.Libraries[dep.ArtifactID]; !configured {
+		depLib, configured := cfg.Libraries[dep.ArtifactID]
+		if !configured {
 			continue
 		}
 		seen[dep.ArtifactID] = true
+		if depLib.Type == config.TypeLibraryBOM {
+			// Telling the user to add this edge would send them into config
+			// validation's rejection of depends_on entries naming the BOM;
+			// state the actual constraint instead.
+			errs = append(errs, fmt.Sprintf("  %s: pom.xml references the library-bom %s; libraries that depend on the BOM are not supported", name, dep.ArtifactID))
+			continue
+		}
 		if !declared[dep.ArtifactID] {
 			errs = append(errs, fmt.Sprintf("  %s: pom.xml depends on %s but depends_on does not list it", name, dep.ArtifactID))
 		}
