@@ -145,6 +145,7 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 			for _, res := range results {
 				if res.err != nil {
 					fmt.Fprintf(w, "  FAILED  %s\n", res.name)
+					fmt.Fprintf(w, "  error:  %v\n", res.err)
 					fmt.Fprintf(w, "  log:    %s\n", res.logFile)
 					fmt.Fprintf(w, "%s\n", res.output)
 					_ = opts.StateWriter.RecordFailed(res.name, res.failedStep, res.err.Error())
@@ -611,6 +612,12 @@ func verifySkippedRelease(entry plan.Entry, ws *workspace.Workspace, r runner.Ru
 	out := io.MultiWriter(f, &buf)
 
 	if err := opts.Checker.Wait(out, opts.GroupID, entry.Name, lastVersion, opts.MaxWait, opts.PollInterval); err != nil {
+		// Unlike the post-release wait, where mvn just uploaded the artifact
+		// and slowness is the only explanation, here the artifact may never
+		// have been deployed: auto-skip fires on the pushed release commits
+		// and tag, which release:prepare creates before release:perform
+		// uploads anything.
+		err = fmt.Errorf("%w (auto-skip found release tag v%s already pushed; if the run that pushed it died before release:perform uploaded the artifact, it was never deployed and waiting longer cannot help — deploy v%s manually from its tag, then run release --resume to finish the changelog and GitHub release)", err, lastVersion, lastVersion)
 		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepCentralVerify, err: err}
 	}
 

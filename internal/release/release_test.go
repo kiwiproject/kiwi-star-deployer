@@ -1170,6 +1170,14 @@ func TestExecute_autoSkipVerifiesCentralAvailability(t *testing.T) {
 	if !strings.Contains(buf.String(), "FAILED") {
 		t.Errorf("expected FAILED in output:\n%s", buf.String())
 	}
+	// The recovery-path timeout must explain that the artifact may never have
+	// been deployed and how to recover, and the error must reach the console.
+	if !strings.Contains(buf.String(), "deploy v2.5.0 manually from its tag") {
+		t.Errorf("expected manual-deploy guidance in output:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "release --resume to finish the changelog") {
+		t.Errorf("expected resume guidance in output:\n%s", buf.String())
+	}
 }
 
 func TestExecute_autoSkipRunsChangelogWhenGitHubReleaseMissing(t *testing.T) {
