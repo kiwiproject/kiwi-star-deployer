@@ -219,6 +219,16 @@ func TestPrepare_uncommittedChanges(t *testing.T) {
 	if !strings.Contains(err.Error(), "uncommitted changes") {
 		t.Errorf("expected 'uncommitted changes' in error, got: %v", err)
 	}
+	// The error must state the remedy and name the clone path. clean -fd is
+	// required alongside reset --hard: status --porcelain also reports
+	// untracked files, which reset alone would not remove.
+	repoDir := w.RepoDir("kiwi")
+	if !strings.Contains(err.Error(), "git -C "+repoDir+" reset --hard && git -C "+repoDir+" clean -fd") {
+		t.Errorf("expected reset and clean remedy with clone path in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "re-cloned automatically") {
+		t.Errorf("expected delete-directory remedy in error, got: %v", err)
+	}
 }
 
 func TestPrepare_fetchFails(t *testing.T) {

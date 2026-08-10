@@ -126,7 +126,7 @@ func (w *Workspace) verifyClean(dir, name string) error {
 		return fmt.Errorf("%s: checking git status: %w", name, err)
 	}
 	if strings.TrimSpace(result.Stdout) != "" {
-		return fmt.Errorf("%s: working copy has uncommitted changes", name)
+		return fmt.Errorf("%s: working copy %s has uncommitted changes (likely a previous run died mid-edit; the local changes are safe to discard — run 'git -C %s reset --hard && git -C %s clean -fd' or delete the directory, which is re-cloned automatically, then retry)", name, dir, dir, dir)
 	}
 	return nil
 }
