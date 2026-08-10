@@ -1170,13 +1170,18 @@ func TestExecute_autoSkipVerifiesCentralAvailability(t *testing.T) {
 	if !strings.Contains(buf.String(), "FAILED") {
 		t.Errorf("expected FAILED in output:\n%s", buf.String())
 	}
-	// The recovery-path timeout must explain that the artifact may never have
-	// been deployed and how to recover, and the error must reach the console.
-	if !strings.Contains(buf.String(), "deploy v2.5.0 manually from its tag") {
-		t.Errorf("expected manual-deploy guidance in output:\n%s", buf.String())
+	// The recovery-path timeout must offer both recoveries — slow publication
+	// (resume again) and never-deployed (manual deploy) — plus the artifact
+	// URL that distinguishes them, and the error must reach the console.
+	out := buf.String()
+	if !strings.Contains(out, "https://repo1.maven.org/maven2/org/kiwiproject/kiwi/2.5.0/") {
+		t.Errorf("expected artifact URL in output:\n%s", out)
 	}
-	if !strings.Contains(buf.String(), "release --resume to finish the changelog") {
-		t.Errorf("expected resume guidance in output:\n%s", buf.String())
+	if !strings.Contains(out, "run release --resume again") {
+		t.Errorf("expected retry guidance in output:\n%s", out)
+	}
+	if !strings.Contains(out, "deploy v2.5.0 manually from its tag") {
+		t.Errorf("expected manual-deploy guidance in output:\n%s", out)
 	}
 }
 

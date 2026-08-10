@@ -613,11 +613,16 @@ func verifySkippedRelease(entry plan.Entry, ws *workspace.Workspace, r runner.Ru
 
 	if err := opts.Checker.Wait(out, opts.GroupID, entry.Name, lastVersion, opts.MaxWait, opts.PollInterval); err != nil {
 		// Unlike the post-release wait, where mvn just uploaded the artifact
-		// and slowness is the only explanation, here the artifact may never
-		// have been deployed: auto-skip fires on the pushed release commits
-		// and tag, which release:prepare creates before release:perform
-		// uploads anything.
-		err = fmt.Errorf("%w (auto-skip found release tag v%s already pushed; if the run that pushed it died before release:perform uploaded the artifact, it was never deployed and waiting longer cannot help — deploy v%s manually from its tag, then run release --resume to finish the changelog and GitHub release)", err, lastVersion, lastVersion)
+		// and slowness is the only explanation, here there are two cases:
+		// Central is still publishing an uploaded artifact (the typical one —
+		// retrying later succeeds), or the artifact was never uploaded at all
+		// (auto-skip fires on the pushed release commits and tag, which
+		// release:prepare creates before release:perform uploads anything).
+		// Offer both recoveries and the URL that distinguishes them; a manual
+		// redeploy of an already-uploaded artifact would be rejected by
+		// Central as a duplicate.
+		artifactURL := fmt.Sprintf("https://repo1.maven.org/maven2/%s/%s/%s/", strings.ReplaceAll(opts.GroupID, ".", "/"), entry.Name, lastVersion)
+		err = fmt.Errorf("%w (auto-skip found release tag v%s already pushed; check %s to tell which recovery applies: if the artifact is still being published by Maven Central, wait and run release --resume again — consider raising maven_central_max_wait — but if the earlier run died before release:perform uploaded anything, deploy v%s manually from its tag and then run release --resume to finish the changelog and GitHub release)", err, lastVersion, artifactURL, lastVersion)
 		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepCentralVerify, err: err}
 	}
 
