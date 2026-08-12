@@ -85,9 +85,13 @@ func runRelease(_ *cobra.Command, _ []string) error {
 		// SNAPSHOT while the matching milestone is only created by the
 		// changelog step — the very step resume's recovery re-runs. Gating a
 		// resume on it would block the recovery that restores the invariant.
+		// With --only, the gate covers only the selected libraries: an
+		// unrelated library's milestone mismatch must not block a release
+		// that does not involve it.
 		if !resume {
-			fmt.Fprintf(os.Stderr, "Checking %d %s against GitHub milestones...\n", len(cfg.Libraries), libNoun(len(cfg.Libraries)))
-			cvResults := checkversions.RunAll(r, cfg.Libraries)
+			gateLibs := selectLibraries(cfg.Libraries, onlyLibs)
+			fmt.Fprintf(os.Stderr, "Checking %d %s against GitHub milestones...\n", len(gateLibs), libNoun(len(gateLibs)))
+			cvResults := checkversions.RunAll(r, gateLibs)
 			checkversions.Print(os.Stdout, cvResults)
 			if !checkversions.AllPassed(cvResults) {
 				return fmt.Errorf("version check failed; fix the mismatches above before releasing")
@@ -216,6 +220,20 @@ func autoPurgeLogs(w io.Writer, logsDir, excludeDir string, retentionDays int) e
 		return err
 	}
 	return purgeLogs(w, nil, logsDir, age, true, excludeDir)
+}
+
+// selectLibraries returns libs restricted to the names in only, or libs
+// unchanged when only is empty. Callers have already validated that every
+// name in only exists in libs.
+func selectLibraries(libs map[string]config.Library, only []string) map[string]config.Library {
+	if len(only) == 0 {
+		return libs
+	}
+	selected := make(map[string]config.Library, len(only))
+	for _, name := range only {
+		selected[name] = libs[name]
+	}
+	return selected
 }
 
 func filterStages(stages [][]plan.Entry, only []string) [][]plan.Entry {

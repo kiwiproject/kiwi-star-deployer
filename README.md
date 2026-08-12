@@ -264,12 +264,13 @@ kiwi-star-deployer release [flags]
 
 Before touching anything, `release` runs the same checks as `preflight`
 and `check-versions` and refuses to start if any fail (both are skipped
-for `--dry-run`). In particular, every configured library's POM SNAPSHOT
-version must have a matching open GitHub milestone — including libraries
-excluded by `--only`. The milestone check is skipped on `--resume`: a
-run that failed between publishing and the changelog step legitimately
-has no next milestone yet, and the resume itself creates it while
-recovering.
+for `--dry-run`). In particular, every library's POM SNAPSHOT version
+must have a matching open GitHub milestone. With `--only`, the milestone
+check covers just the selected libraries, so an unrelated library's
+mismatch cannot block a patch release that does not involve it. The
+milestone check is skipped on `--resume`: a run that failed between
+publishing and the changelog step legitimately has no next milestone
+yet, and the resume itself creates it while recovering.
 
 While computing the plan, both `plan` and `release` also validate the
 config against each library's actual POM: any dependency in the POM

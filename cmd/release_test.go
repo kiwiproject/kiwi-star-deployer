@@ -244,6 +244,23 @@ func mustPlanEntry(name string) plan.Entry {
 	return plan.Entry{Name: name, Stage: 1, VersionPlan: vp}
 }
 
+func TestSelectLibraries_emptyOnlyReturnsAll(t *testing.T) {
+	got := selectLibraries(testLibs, nil)
+	if len(got) != len(testLibs) {
+		t.Errorf("expected all %d libraries, got %d", len(testLibs), len(got))
+	}
+}
+
+func TestSelectLibraries_restrictsToOnly(t *testing.T) {
+	got := selectLibraries(testLibs, []string{"kiwi"})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 library, got %d", len(got))
+	}
+	if got["kiwi"].Repo != "kiwiproject/kiwi" {
+		t.Errorf("expected kiwi entry preserved, got %+v", got["kiwi"])
+	}
+}
+
 func TestFilterStages_keepsMatchingEntries(t *testing.T) {
 	stages := [][]plan.Entry{
 		{mustPlanEntry("kiwi-parent")},
