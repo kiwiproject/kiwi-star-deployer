@@ -44,10 +44,10 @@ func TestGHChecker_runFoundImmediatelyAndPasses(t *testing.T) {
 
 func TestGHChecker_runAppearsAfterRetry(t *testing.T) {
 	fr := &runner.FakeRunner{}
-	fr.AddResponse(&runner.Result{Stdout: runListEmpty}, nil)   // gh run list (empty)
-	fr.AddResponse(&runner.Result{Stdout: workflowsOne}, nil)   // gh api workflows (has CI)
-	fr.AddResponse(&runner.Result{Stdout: runListOne}, nil)     // gh run list (found)
-	fr.AddResponse(&runner.Result{Stdout: runSuccess}, nil)     // gh run view
+	fr.AddResponse(&runner.Result{Stdout: runListEmpty}, nil) // gh run list (empty)
+	fr.AddResponse(&runner.Result{Stdout: workflowsOne}, nil) // gh api workflows (has CI)
+	fr.AddResponse(&runner.Result{Stdout: runListOne}, nil)   // gh run list (found)
+	fr.AddResponse(&runner.Result{Stdout: runSuccess}, nil)   // gh run view
 
 	var buf bytes.Buffer
 	err := newChecker(fr).Wait(&buf, "kiwiproject/kiwi", "abc123def456", time.Minute, time.Millisecond)
@@ -124,10 +124,10 @@ func TestGHChecker_workflowCheckErrorContinuesWaiting(t *testing.T) {
 // listRuns calls total: one per cycle.
 func TestGHChecker_runInProgressThenCompletes(t *testing.T) {
 	fr := &runner.FakeRunner{}
-	fr.AddResponse(&runner.Result{Stdout: runListOne}, nil)   // gh run list  (cycle 1)
+	fr.AddResponse(&runner.Result{Stdout: runListOne}, nil)    // gh run list  (cycle 1)
 	fr.AddResponse(&runner.Result{Stdout: runInProgress}, nil) // gh run view  (cycle 1)
-	fr.AddResponse(&runner.Result{Stdout: runListOne}, nil)   // gh run list  (cycle 2)
-	fr.AddResponse(&runner.Result{Stdout: runSuccess}, nil)   // gh run view  (cycle 2)
+	fr.AddResponse(&runner.Result{Stdout: runListOne}, nil)    // gh run list  (cycle 2)
+	fr.AddResponse(&runner.Result{Stdout: runSuccess}, nil)    // gh run view  (cycle 2)
 
 	var buf bytes.Buffer
 	err := newChecker(fr).Wait(&buf, "kiwiproject/kiwi", "abc123def456", time.Minute, time.Millisecond)

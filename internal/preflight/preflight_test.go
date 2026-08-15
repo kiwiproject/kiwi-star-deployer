@@ -136,7 +136,7 @@ func TestRunAll_ghVersionExactMinimum(t *testing.T) {
 func TestRunAll_ghVersionUnparseable(t *testing.T) {
 	fr := &runner.FakeRunner{}
 	fr.AddResponse(&runner.Result{Stdout: "something unexpected\n"}, nil) // gh --version
-	fr.AddResponse(&runner.Result{}, nil)                                // gh auth status
+	fr.AddResponse(&runner.Result{}, nil)                                 // gh auth status
 
 	res := findResult(t, preflight.RunAll(fr, ".generate-kiwi-changelog"), "gh version")
 	if res.OK {

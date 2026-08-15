@@ -73,4 +73,3 @@ func parseXYZ(v string) ([3]int, error) {
 	}
 	return nums, nil
 }
-

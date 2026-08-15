@@ -39,7 +39,7 @@ lint:
 check: vet test lint
 
 fmt:
-	gofmt -w ./...
+	gofmt -w .
 
 tidy:
 	go mod tidy
