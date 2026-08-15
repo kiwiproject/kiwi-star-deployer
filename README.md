@@ -17,6 +17,9 @@ is tedious and error-prone. `kiwi-star-deployer` automates the full sequence:
 5. Updates downstream POM files and verifies CI passes before the next stage
 6. Writes incremental state so a failed run can be resumed from where it left off
 
+If a release has already gone wrong, see [RUNBOOK.md](RUNBOOK.md) for
+recovery procedures instead of this document.
+
 ## Prerequisites
 
 The following tools must be installed and on your PATH before running:
@@ -326,7 +329,9 @@ version is taken from its latest release tag and must exist on Maven
 Central, otherwise the run refuses to start. To recover a library whose
 release *failed*, resume without `--skip` — auto-skip detection verifies
 Maven Central and re-runs the changelog step as needed, which `--skip`
-would bypass.
+would bypass. For recovery procedures beyond a plain `--resume` — a
+release that died before Maven Central confirmed it, or before
+`release:prepare` even finished — see [RUNBOOK.md](RUNBOOK.md).
 
 Major release with per-library changelog summaries:
 
