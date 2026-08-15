@@ -87,19 +87,19 @@ func makeStages(entries ...plan.Entry) [][]plan.Entry {
 // git describe, mvn, and changelog.
 func addLibraryResponses(fr *runner.FakeRunner, previousTag string) {
 	fr.AddResponse(&runner.Result{Stdout: previousTag}, nil) // git describe
-	fr.AddResponse(&runner.Result{}, nil)                   // mvn
-	fr.AddResponse(&runner.Result{}, nil)                   // changelog
+	fr.AddResponse(&runner.Result{}, nil)                    // mvn
+	fr.AddResponse(&runner.Result{}, nil)                    // changelog
 }
 
 // addPOMUpdateResponses adds the five runner responses for one successful POM update:
 // mvn versions (use-dep-version or set-property), git status --porcelain (reports changes),
 // git add, git commit, git push.
 func addPOMUpdateResponses(fr *runner.FakeRunner) {
-	fr.AddResponse(&runner.Result{}, nil)                        // mvn versions
+	fr.AddResponse(&runner.Result{}, nil)                       // mvn versions
 	fr.AddResponse(&runner.Result{Stdout: " M pom.xml\n"}, nil) // git status --porcelain
-	fr.AddResponse(&runner.Result{}, nil)                        // git add
-	fr.AddResponse(&runner.Result{}, nil)                        // git commit
-	fr.AddResponse(&runner.Result{}, nil)                        // git push
+	fr.AddResponse(&runner.Result{}, nil)                       // git add
+	fr.AddResponse(&runner.Result{}, nil)                       // git commit
+	fr.AddResponse(&runner.Result{}, nil)                       // git push
 }
 
 func TestExecute_singleLibrarySuccess(t *testing.T) {
@@ -324,13 +324,115 @@ func TestExecute_changelogFailureHalts(t *testing.T) {
 	}
 }
 
+// TestExecute_downstreamPOMUpdateBatchedAcrossStages is the regression test
+// for the deferred-batching fix: d depends on a, b, and c, each released in
+// its own separate earlier stage. Before the fix, d's POM would have been
+// updated three times — once eagerly after each of a, b, c releases — for
+// three separate commit/push cycles. After the fix, d's dependency bumps are
+// deferred and batched into exactly one commit, applied immediately before
+// d's own stage. The exact runner call count pins this: with the FakeRunner
+// ordered queue, three eager cycles would consume a different number and
+// order of calls than one batched cycle, and produce a wrong response for
+// whatever call runs next once the queue is out of alignment.
+func TestExecute_downstreamPOMUpdateBatchedAcrossStages(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v1.0.0") // a: git describe, mvn, changelog
+	addLibraryResponses(fr, "v1.0.0") // b: git describe, mvn, changelog
+	addLibraryResponses(fr, "v1.0.0") // c: git describe, mvn, changelog
+	// d's single batched POM update: one mvn versions call per dependency
+	// (a, b, c), then exactly one status/add/commit/push cycle.
+	fr.AddResponse(&runner.Result{}, nil)                       // mvn versions for a
+	fr.AddResponse(&runner.Result{}, nil)                       // mvn versions for b
+	fr.AddResponse(&runner.Result{}, nil)                       // mvn versions for c
+	fr.AddResponse(&runner.Result{Stdout: " M pom.xml\n"}, nil) // git status --porcelain
+	fr.AddResponse(&runner.Result{}, nil)                       // git add
+	fr.AddResponse(&runner.Result{}, nil)                       // git commit
+	fr.AddResponse(&runner.Result{}, nil)                       // git push
+	addLibraryResponses(fr, "v1.0.0")                           // d: git describe, mvn, changelog
+
+	stages := makeStages(
+		plan.Entry{Name: "a", Repo: "kiwiproject/a", Stage: 1, VersionPlan: mustPlan("a", "1.0.1-SNAPSHOT")},
+		plan.Entry{Name: "b", Repo: "kiwiproject/b", Stage: 2, VersionPlan: mustPlan("b", "1.0.1-SNAPSHOT")},
+		plan.Entry{Name: "c", Repo: "kiwiproject/c", Stage: 3, VersionPlan: mustPlan("c", "1.0.1-SNAPSHOT")},
+		plan.Entry{Name: "d", Repo: "kiwiproject/d", Stage: 4, DependsOn: []string{"a", "b", "c"}, VersionPlan: mustPlan("d", "2.0.1-SNAPSHOT")},
+	)
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), defaultOpts())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 3+3+3 (a, b, c releases) + 7 (d's one batched POM update: 3 mvn calls
+	// plus status/add/commit/push) + 3 (d release) = 19. Three separate
+	// eager cycles instead would each be a full 5-call update (1 mvn versions
+	// call plus status/add/commit/push), needing 3+3+3+3*5+3 = 27.
+	if fr.CallCount() != 19 {
+		t.Errorf("expected 19 runner calls (one batched POM update, not three separate ones), got %d", fr.CallCount())
+	}
+	out := buf.String()
+	if strings.Count(out, "POM update d:") != 1 {
+		t.Errorf("expected exactly one POM update line for d, got:\n%s", out)
+	}
+	if !strings.Contains(out, "POM update d: a 1.0.1, b 1.0.1, c 1.0.1") {
+		t.Errorf("expected all three dependencies in one batched POM update line:\n%s", out)
+	}
+}
+
+// TestExecute_downstreamPOMUpdatePicksUpAllCompletedDependencyVersions proves
+// the accumulation works across --resume-style Completed entries spanning
+// multiple earlier stages too, not just freshly-released ones: c depends on
+// both a and b, already marked Completed from a prior run, in different
+// stages. c's single batched update must include both.
+func TestExecute_downstreamPOMUpdatePicksUpAllCompletedDependencyVersions(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	// a and b are both Completed already — no release calls for either.
+	fr.AddResponse(&runner.Result{}, nil)                       // mvn versions for a
+	fr.AddResponse(&runner.Result{}, nil)                       // mvn versions for b
+	fr.AddResponse(&runner.Result{Stdout: " M pom.xml\n"}, nil) // git status --porcelain
+	fr.AddResponse(&runner.Result{}, nil)                       // git add
+	fr.AddResponse(&runner.Result{}, nil)                       // git commit
+	fr.AddResponse(&runner.Result{}, nil)                       // git push
+	addLibraryResponses(fr, "v1.0.0")                           // c: git describe, mvn, changelog
+
+	stages := makeStages(
+		plan.Entry{Name: "a", Repo: "kiwiproject/a", Stage: 1, VersionPlan: mustPlan("a", "1.0.1-SNAPSHOT")},
+		plan.Entry{Name: "b", Repo: "kiwiproject/b", Stage: 2, VersionPlan: mustPlan("b", "1.0.1-SNAPSHOT")},
+		plan.Entry{Name: "c", Repo: "kiwiproject/c", Stage: 3, DependsOn: []string{"a", "b"}, VersionPlan: mustPlan("c", "2.0.1-SNAPSHOT")},
+	)
+
+	opts := defaultOpts()
+	opts.Completed = map[string]string{"a": "1.0.0", "b": "1.0.0"}
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 6 (c's batched POM update: 2 mvn calls plus status/add/commit/push) + 3 (c release) = 9
+	if fr.CallCount() != 9 {
+		t.Errorf("expected 9 runner calls, got %d", fr.CallCount())
+	}
+	out := buf.String()
+	if !strings.Contains(out, "POM update c: a 1.0.0, b 1.0.0") {
+		t.Errorf("expected c's POM update to include both completed dependencies from separate stages:\n%s", out)
+	}
+}
+
 func TestExecute_updatesDownstreamPOMs(t *testing.T) {
 	dir := t.TempDir()
 	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.9.0") // kiwi-parent release (git describe, mvn, changelog)
-	addPOMUpdateResponses(fr)          // kiwi POM update
+	addPOMUpdateResponses(fr)         // kiwi POM update
 	addLibraryResponses(fr, "v2.5.0") // kiwi release
 
 	stages := makeStages(
@@ -359,7 +461,7 @@ func TestExecute_updatesLibraryBOMPOMs(t *testing.T) {
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.9.0") // kiwi-parent release
-	addPOMUpdateResponses(fr)          // kiwi-libraries-bom POM update
+	addPOMUpdateResponses(fr)         // kiwi-libraries-bom POM update
 	addLibraryResponses(fr, "v1.0.0") // kiwi-libraries-bom release
 
 	stages := makeStages(
@@ -388,7 +490,7 @@ func TestExecute_nonParentPOMDepUsesSetProperty(t *testing.T) {
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.5.0") // kiwi release (no type — regular library)
-	addPOMUpdateResponses(fr)          // kiwi-test POM update
+	addPOMUpdateResponses(fr)         // kiwi-test POM update
 	addLibraryResponses(fr, "v3.0.0") // kiwi-test release
 
 	stages := makeStages(
@@ -426,8 +528,8 @@ func TestExecute_pomUpdateFailureHalts(t *testing.T) {
 	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
-	addLibraryResponses(fr, "v2.9.0")                    // kiwi-parent release succeeds
-	fr.AddResponse(nil, errors.New("exit status 1"))     // mvn versions fails
+	addLibraryResponses(fr, "v2.9.0")                // kiwi-parent release succeeds
+	fr.AddResponse(nil, errors.New("exit status 1")) // mvn versions fails
 
 	stages := makeStages(
 		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
@@ -450,7 +552,7 @@ func TestExecute_verifyPOMUpdateArgs(t *testing.T) {
 
 	fr := &runner.FakeRunner{}
 	addLibraryResponses(fr, "v2.9.0") // kiwi-parent release
-	addPOMUpdateResponses(fr)          // kiwi POM update
+	addPOMUpdateResponses(fr)         // kiwi POM update
 	addLibraryResponses(fr, "v2.5.0") // kiwi release
 
 	stages := makeStages(
@@ -555,7 +657,7 @@ func TestExecute_completedLibraryIsSkipped(t *testing.T) {
 
 	fr := &runner.FakeRunner{}
 	// kiwi-parent is in Completed — no runner calls for it
-	addPOMUpdateResponses(fr)          // kiwi POM update
+	addPOMUpdateResponses(fr)         // kiwi POM update
 	addLibraryResponses(fr, "v2.5.0") // kiwi: git describe, mvn, changelog
 
 	stages := makeStages(
@@ -719,7 +821,7 @@ func TestExecute_skippedVersionUsedInPOMUpdate(t *testing.T) {
 
 	fr := &runner.FakeRunner{}
 	// kiwi-parent completed as 2.9.0, but plan would compute 3.0.0 from 3.0.0-SNAPSHOT
-	addPOMUpdateResponses(fr)          // kiwi POM update (should use 2.9.0)
+	addPOMUpdateResponses(fr)         // kiwi POM update (should use 2.9.0)
 	addLibraryResponses(fr, "v2.5.0") // kiwi: git describe, mvn, changelog
 
 	stages := makeStages(
@@ -747,10 +849,10 @@ func TestExecute_ciVerificationPassesAfterPOMUpdate(t *testing.T) {
 	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
-	addLibraryResponses(fr, "v2.9.0")                      // kiwi-parent: git describe, mvn, changelog
+	addLibraryResponses(fr, "v2.9.0")                       // kiwi-parent: git describe, mvn, changelog
 	addPOMUpdateResponses(fr)                               // kiwi POM update
 	fr.AddResponse(&runner.Result{Stdout: "abc123\n"}, nil) // git rev-parse HEAD
-	addLibraryResponses(fr, "v2.5.0")                      // kiwi: git describe, mvn, changelog
+	addLibraryResponses(fr, "v2.5.0")                       // kiwi: git describe, mvn, changelog
 
 	stages := makeStages(
 		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
@@ -785,7 +887,7 @@ func TestExecute_ciVerificationFailureHalts(t *testing.T) {
 	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
-	addLibraryResponses(fr, "v2.9.0")                      // kiwi-parent: git describe, mvn, changelog
+	addLibraryResponses(fr, "v2.9.0")                       // kiwi-parent: git describe, mvn, changelog
 	addPOMUpdateResponses(fr)                               // kiwi POM update
 	fr.AddResponse(&runner.Result{Stdout: "abc123\n"}, nil) // git rev-parse HEAD
 	// kiwi release should NOT run after CI failure
@@ -921,9 +1023,9 @@ func TestExecute_pomUpdateSkippedWhenAlreadyUpToDate(t *testing.T) {
 	ws := workspace.New(dir, &prepareSuccessRunner{})
 
 	fr := &runner.FakeRunner{}
-	addLibraryResponses(fr, "v2.9.0")                        // kiwi-parent release
-	fr.AddResponse(&runner.Result{}, nil)                    // mvn versions:use-dep-version (no-op)
-	fr.AddResponse(&runner.Result{Stdout: ""}, nil)          // git status --porcelain: no changes
+	addLibraryResponses(fr, "v2.9.0")               // kiwi-parent release
+	fr.AddResponse(&runner.Result{}, nil)           // mvn versions:use-dep-version (no-op)
+	fr.AddResponse(&runner.Result{Stdout: ""}, nil) // git status --porcelain: no changes
 	// git add/commit/push must NOT run
 	addLibraryResponses(fr, "v2.5.0") // kiwi release
 
@@ -1240,8 +1342,8 @@ func TestExecute_autoSkipChangelogFailureHalts(t *testing.T) {
 	fr.AddResponse(&runner.Result{Stdout: "abc1234 [maven-release-plugin] prepare for next development iteration\ndef5678 [maven-release-plugin] prepare release v2.5.0\n"}, nil)
 	fr.AddResponse(&runner.Result{Stdout: "v2.5.0\n"}, nil) // git tag --points-at
 	fr.AddResponse(&runner.Result{Stderr: "gh: Not Found (HTTP 404)"}, errors.New("exit status 1"))
-	fr.AddResponse(&runner.Result{Stdout: "v2.4.0\n"}, nil)  // git describe v2.5.0^
-	fr.AddResponse(nil, errors.New("milestone API error"))   // changelog fails
+	fr.AddResponse(&runner.Result{Stdout: "v2.4.0\n"}, nil) // git describe v2.5.0^
+	fr.AddResponse(nil, errors.New("milestone API error"))  // changelog fails
 
 	stages := makeStages(
 		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},

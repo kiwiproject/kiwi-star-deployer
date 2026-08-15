@@ -493,10 +493,17 @@ Stage 2:  kiwi-bom, kiwi          (parallel — neither depends on the other)
 Stage 3:  kiwi-libraries-bom
 ```
 
-After each stage completes, the tool updates the `pom.xml` of every library
-in future stages that depends on a just-released library, commits the change,
-pushes it, and waits for GitHub Actions CI to pass before starting the next
-stage.
+Before each stage starts (other than the first), the tool updates the
+`pom.xml` of every library in that stage to the released versions of any
+dependencies from earlier stages, commits the change, pushes it, and waits
+for GitHub Actions CI to pass. Dependency bumps are deferred and batched
+this way rather than applied the moment each dependency becomes available:
+a library depending on artifacts released across several earlier stages
+gets one combined commit and one CI verification, immediately before its
+own stage, instead of a separate cycle per earlier stage. This matters most
+for `library-bom`, which typically depends on nearly every other library —
+without batching it would otherwise go through a separate commit and CI
+wait after almost every stage in the run.
 
 If any library in a stage fails, the entire run halts. Use `kiwi-star-deployer status`
 to see what completed, then `kiwi-star-deployer release --resume` to pick up

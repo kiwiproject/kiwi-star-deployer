@@ -116,7 +116,21 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 	}
 
 	var totalReleased int
+	// released accumulates every library's actual released (or skipped)
+	// version across all completed stages so far. A downstream library's POM
+	// update is deferred until immediately before its own stage, at which
+	// point it picks up every applicable dependency version accumulated
+	// since the start of the run — not just the immediately preceding stage
+	// — in a single commit and CI verification, rather than one cycle per
+	// earlier stage that happened to release one of its dependencies.
+	released := make(map[string]plan.Entry)
 	for i, stage := range stages {
+		if i > 0 {
+			if err := updateDownstreamPOMs(w, released, stage, ws, r, logDir, opts); err != nil {
+				return err
+			}
+		}
+
 		names := make([]string, len(stage))
 		for j, e := range stage {
 			names[j] = e.Name
@@ -136,13 +150,13 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 		for _, e := range toSkip {
 			fmt.Fprintf(w, "  skip    %s  (version: %s)\n", e.Name, e.VersionPlan.ReleaseVersion)
 			_ = opts.StateWriter.RecordCompleted(e.Name, e.VersionPlan.ReleaseVersion)
+			released[e.Name] = e
 		}
 
 		var failed bool
-		var results []libraryResult
 		if len(toRelease) > 0 {
-			results = releaseStage(toRelease, ws, r, logDir, opts)
-			for _, res := range results {
+			results := releaseStage(toRelease, ws, r, logDir, opts)
+			for idx, res := range results {
 				if res.err != nil {
 					fmt.Fprintf(w, "  FAILED  %s\n", res.name)
 					fmt.Fprintf(w, "  error:  %v\n", res.err)
@@ -150,33 +164,26 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 					fmt.Fprintf(w, "%s\n", res.output)
 					_ = opts.StateWriter.RecordFailed(res.name, res.failedStep, res.err.Error())
 					failed = true
-				} else if res.autoSkipped {
+					continue
+				}
+				if res.autoSkipped {
 					fmt.Fprintf(w, "  skip    %s  (no changes since %s)\n", res.name, res.version)
 				} else {
 					fmt.Fprintf(w, "  done    %s  (log: %s)\n", res.name, res.logFile)
 					totalReleased++
 				}
+				// Auto-skipped entries use the detected released version, not
+				// the planned one.
+				e := toRelease[idx]
+				if res.autoSkipped && res.version != "" {
+					e.VersionPlan.ReleaseVersion = res.version
+				}
+				released[e.Name] = e
 			}
 		}
 
 		if failed {
 			return fmt.Errorf("stage %d failed; halting", i+1)
-		}
-
-		if i < len(stages)-1 {
-			// Build effectiveStage for downstream POM updates. Auto-skipped
-			// entries use the detected released version, not the planned one.
-			effectiveStage := make([]plan.Entry, 0, len(toSkip)+len(toRelease))
-			effectiveStage = append(effectiveStage, toSkip...)
-			for idx, e := range toRelease {
-				if results[idx].autoSkipped && results[idx].version != "" {
-					e.VersionPlan.ReleaseVersion = results[idx].version
-				}
-				effectiveStage = append(effectiveStage, e)
-			}
-			if err := updateDownstreamPOMs(w, effectiveStage, stages[i+1:], ws, r, logDir, opts); err != nil {
-				return err
-			}
 		}
 	}
 
@@ -235,56 +242,56 @@ func buildSkipVersions(w io.Writer, opts Options, stages [][]plan.Entry, ws *wor
 	return skip, nil
 }
 
-func updateDownstreamPOMs(w io.Writer, releasedStage []plan.Entry, futureStages [][]plan.Entry, ws *workspace.Workspace, r runner.Runner, logDir string, opts Options) error {
-	released := make(map[string]plan.Entry)
-	for _, e := range releasedStage {
-		released[e.Name] = e
-	}
+// updateDownstreamPOMs bumps every entry in stage to the released versions of
+// its dependencies already present in released, in one commit and one CI
+// verification per entry. Called once per stage, immediately before it is
+// released, using every library version accumulated from all prior stages —
+// not just the immediately preceding one — so each entry's dependency bumps
+// land in a single batch at the last possible moment rather than one cycle
+// per earlier stage that happened to release one of its dependencies.
+func updateDownstreamPOMs(w io.Writer, released map[string]plan.Entry, stage []plan.Entry, ws *workspace.Workspace, r runner.Runner, logDir string, opts Options) error {
+	for _, entry := range stage {
+		var deps []plan.Entry
+		for _, depName := range entry.DependsOn {
+			if re, ok := released[depName]; ok {
+				deps = append(deps, re)
+			}
+		}
+		if len(deps) == 0 {
+			continue
+		}
 
-	for _, stage := range futureStages {
-		for _, entry := range stage {
-			var deps []plan.Entry
-			for _, depName := range entry.DependsOn {
-				if re, ok := released[depName]; ok {
-					deps = append(deps, re)
-				}
-			}
-			if len(deps) == 0 {
-				continue
-			}
+		logFile := filepath.Join(logDir, entry.Name+"-pom-update.log")
+		depSummary := make([]string, len(deps))
+		for i, d := range deps {
+			depSummary[i] = d.Name + " " + d.VersionPlan.ReleaseVersion
+		}
+		fmt.Fprintf(w, "  POM update %s: %s\n", entry.Name, strings.Join(depSummary, ", "))
 
-			logFile := filepath.Join(logDir, entry.Name+"-pom-update.log")
-			depSummary := make([]string, len(deps))
-			for i, d := range deps {
-				depSummary[i] = d.Name + " " + d.VersionPlan.ReleaseVersion
-			}
-			fmt.Fprintf(w, "  POM update %s: %s\n", entry.Name, strings.Join(depSummary, ", "))
+		if err := updatePOM(entry, deps, ws, r, logFile, opts.GroupID); err != nil {
+			fmt.Fprintf(w, "  FAILED POM update %s\n", entry.Name)
+			fmt.Fprintf(w, "  log:   %s\n", logFile)
+			_ = opts.StateWriter.RecordFailed(entry.Name, state.StepPOMUpdate, err.Error())
+			return fmt.Errorf("POM update for %s: %w", entry.Name, err)
+		}
+		fmt.Fprintf(w, "  done   POM update %s  (log: %s)\n", entry.Name, logFile)
 
-			if err := updatePOM(entry, deps, ws, r, logFile, opts.GroupID); err != nil {
-				fmt.Fprintf(w, "  FAILED POM update %s\n", entry.Name)
-				fmt.Fprintf(w, "  log:   %s\n", logFile)
-				_ = opts.StateWriter.RecordFailed(entry.Name, state.StepPOMUpdate, err.Error())
-				return fmt.Errorf("POM update for %s: %w", entry.Name, err)
+		if opts.CIChecker != nil {
+			shaResult, err := r.Run(runner.Options{
+				Command:    "git",
+				Args:       []string{"rev-parse", "HEAD"},
+				WorkingDir: ws.RepoDir(entry.Name),
+			})
+			if err != nil {
+				return fmt.Errorf("git rev-parse HEAD after POM update for %s: %w", entry.Name, err)
 			}
-			fmt.Fprintf(w, "  done   POM update %s  (log: %s)\n", entry.Name, logFile)
-
-			if opts.CIChecker != nil {
-				shaResult, err := r.Run(runner.Options{
-					Command:    "git",
-					Args:       []string{"rev-parse", "HEAD"},
-					WorkingDir: ws.RepoDir(entry.Name),
-				})
-				if err != nil {
-					return fmt.Errorf("git rev-parse HEAD after POM update for %s: %w", entry.Name, err)
-				}
-				commitSHA := strings.TrimSpace(shaResult.Stdout)
-				fmt.Fprintf(w, "  CI verify %s...\n", entry.Name)
-				if err := opts.CIChecker.Wait(w, entry.Repo, commitSHA, opts.CIMaxWait, opts.CIPollInterval); err != nil {
-					_ = opts.StateWriter.RecordFailed(entry.Name, state.StepCIVerify, err.Error())
-					return fmt.Errorf("CI verification for %s: %w", entry.Name, err)
-				}
-				fmt.Fprintf(w, "  CI passed %s\n", entry.Name)
+			commitSHA := strings.TrimSpace(shaResult.Stdout)
+			fmt.Fprintf(w, "  CI verify %s...\n", entry.Name)
+			if err := opts.CIChecker.Wait(w, entry.Repo, commitSHA, opts.CIMaxWait, opts.CIPollInterval); err != nil {
+				_ = opts.StateWriter.RecordFailed(entry.Name, state.StepCIVerify, err.Error())
+				return fmt.Errorf("CI verification for %s: %w", entry.Name, err)
 			}
+			fmt.Fprintf(w, "  CI passed %s\n", entry.Name)
 		}
 	}
 	return nil
