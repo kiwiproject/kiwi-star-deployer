@@ -119,6 +119,33 @@ func TestLoad_appliesDefaultChangelogScript(t *testing.T) {
 	}
 }
 
+func TestLoad_appliesDefaultDependencyBumpIssueLabel(t *testing.T) {
+	cfg, err := config.Load("testdata/minimal.toml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Settings.DependencyBumpIssueLabel != "dependencies" {
+		t.Errorf("dependency_bump_issue_label: got %q, want dependencies", cfg.Settings.DependencyBumpIssueLabel)
+	}
+}
+
+func TestLoad_appliesExplicitDependencyBumpIssueLabel(t *testing.T) {
+	path := writeTempTOML(t, `
+[library.kiwi]
+repo = "kiwiproject/kiwi"
+
+[settings]
+dependency_bump_issue_label = "dep-bump"
+`)
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Settings.DependencyBumpIssueLabel != "dep-bump" {
+		t.Errorf("dependency_bump_issue_label: got %q, want dep-bump", cfg.Settings.DependencyBumpIssueLabel)
+	}
+}
+
 func TestLoad_expandsTildeInChangelogScript(t *testing.T) {
 	path := writeTempTOML(t, `
 [library.kiwi]

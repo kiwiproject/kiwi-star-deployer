@@ -32,6 +32,7 @@ type Settings struct {
 	CIMaxWait                Duration `toml:"ci_max_wait"`
 	CIPollInterval           Duration `toml:"ci_poll_interval"`
 	LogRetentionDays         int      `toml:"log_retention_days"`
+	DependencyBumpIssueLabel string   `toml:"dependency_bump_issue_label"`
 }
 
 // LogsDir returns the base directory where release run logs are stored.
@@ -98,6 +99,9 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Settings.ChangelogScript == "" {
 		cfg.Settings.ChangelogScript = ".generate-kiwi-changelog"
+	}
+	if cfg.Settings.DependencyBumpIssueLabel == "" {
+		cfg.Settings.DependencyBumpIssueLabel = "dependencies"
 	}
 	if cfg.Settings.MavenReleaseTimeout == 0 {
 		cfg.Settings.MavenReleaseTimeout = Duration(60 * time.Minute)

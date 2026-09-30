@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -52,6 +53,38 @@ type fakeCIChecker struct{ err error }
 
 func (f *fakeCIChecker) Wait(_ io.Writer, _, _ string, _, _ time.Duration) error {
 	return f.err
+}
+
+type createdIssue struct {
+	repo, title, body, label, milestone string
+}
+
+// fakeIssueCreator is a test double for release.IssueCreator. existing seeds
+// the titles ListOpenByMilestone reports as already open (dedup source);
+// listErr, if set, makes ListOpenByMilestone fail (e.g. a missing milestone).
+// Each Create call is recorded and assigned sequential numbers starting at
+// nextNumber.
+type fakeIssueCreator struct {
+	mu         sync.Mutex
+	existing   map[string]int
+	listErr    error
+	nextNumber int
+	created    []createdIssue
+}
+
+func (f *fakeIssueCreator) ListOpenByMilestone(_, _ string) (map[string]int, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.existing, nil
+}
+
+func (f *fakeIssueCreator) Create(repo, title, body, label, milestone string) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nextNumber++
+	f.created = append(f.created, createdIssue{repo: repo, title: title, body: body, label: label, milestone: milestone})
+	return f.nextNumber, nil
 }
 
 func defaultOpts() release.Options {
@@ -913,6 +946,156 @@ func TestExecute_ciVerificationFailureHalts(t *testing.T) {
 	// 3 (kiwi-parent) + 5 (POM update) + 1 (git rev-parse HEAD) = 9 calls; kiwi release never starts
 	if fr.CallCount() != 9 {
 		t.Errorf("expected 9 runner calls, got %d", fr.CallCount())
+	}
+}
+
+func TestExecute_createsDependencyBumpIssues(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.9.0") // kiwi-parent release
+	addPOMUpdateResponses(fr)         // kiwi POM update
+	addLibraryResponses(fr, "v2.5.0") // kiwi release
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	ic := &fakeIssueCreator{}
+	opts := defaultOpts()
+	opts.IssueCreator = ic
+	opts.DependencyBumpIssueLabel = "dependencies"
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(ic.created) != 1 {
+		t.Fatalf("expected 1 issue created, got %d: %+v", len(ic.created), ic.created)
+	}
+	got := ic.created[0]
+	if got.repo != "kiwiproject/kiwi" || got.title != "Update kiwi-parent to 3.0.0" ||
+		got.label != "dependencies" || got.milestone != "2.5.1" {
+		t.Errorf("unexpected created issue: %+v", got)
+	}
+
+	commitCall := fr.Calls[6] // 3 (kiwi-parent) + mvn versions + git status + git add = index 6
+	if commitCall.Command != "git" || commitCall.Args[0] != "commit" {
+		t.Fatalf("expected git commit call at index 6, got %+v", commitCall)
+	}
+	msg := commitCall.Args[2]
+	if !strings.Contains(msg, "Closes #1\n") {
+		t.Errorf("expected 'Closes #1' in commit message:\n%s", msg)
+	}
+}
+
+func TestExecute_dependencyBumpIssueDedupReusesExisting(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.9.0")
+	addPOMUpdateResponses(fr)
+	addLibraryResponses(fr, "v2.5.0")
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	ic := &fakeIssueCreator{existing: map[string]int{"Update kiwi-parent to 3.0.0": 501}}
+	opts := defaultOpts()
+	opts.IssueCreator = ic
+	opts.DependencyBumpIssueLabel = "dependencies"
+
+	logBaseDir := t.TempDir()
+	if err := release.Execute(&bytes.Buffer{}, stages, ws, fr, logBaseDir, opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(ic.created) != 0 {
+		t.Errorf("expected no issues created (reused existing), got %+v", ic.created)
+	}
+	// "issue already exists" is logged to the per-library POM-update log file,
+	// not the top-level narrative writer.
+	entries, err := os.ReadDir(logBaseDir)
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("reading logBaseDir: %v", err)
+	}
+	logData, err := os.ReadFile(filepath.Join(logBaseDir, entries[0].Name(), "kiwi-pom-update.log"))
+	if err != nil {
+		t.Fatalf("reading kiwi-pom-update.log: %v", err)
+	}
+	if !strings.Contains(string(logData), "issue already exists") {
+		t.Errorf("expected 'issue already exists' log line in kiwi-pom-update.log:\n%s", logData)
+	}
+	commitCall := fr.Calls[6]
+	msg := commitCall.Args[2]
+	if !strings.Contains(msg, "Closes #501\n") {
+		t.Errorf("expected 'Closes #501' (reused number) in commit message:\n%s", msg)
+	}
+}
+
+func TestExecute_dependencyBumpIssuesDisabledLeavesCommitMessageUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.9.0")
+	addPOMUpdateResponses(fr)
+	addLibraryResponses(fr, "v2.5.0")
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	// defaultOpts leaves IssueCreator nil — the feature is off.
+	err := release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), defaultOpts())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	commitCall := fr.Calls[6]
+	msg := commitCall.Args[2]
+	if strings.Contains(msg, "Closes #") {
+		t.Errorf("expected no 'Closes #' in commit message with IssueCreator disabled:\n%s", msg)
+	}
+}
+
+func TestExecute_missingMilestoneFailsPOMUpdate(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.9.0") // kiwi-parent release succeeds
+	// no mvn/git responses queued for the POM update: the milestone check
+	// runs before mvn touches the working copy, so none of them are reached
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	ic := &fakeIssueCreator{listErr: errors.New(`milestone "2.5.1" does not exist as an open milestone on kiwiproject/kiwi; create it before releasing`)}
+	opts := defaultOpts()
+	opts.IssueCreator = ic
+
+	err := release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), opts)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "does not exist as an open milestone") {
+		t.Errorf("expected milestone error, got: %v", err)
+	}
+	// 3 (kiwi-parent); the POM update's mvn/git calls never run since the
+	// milestone check fails before any of them
+	if fr.CallCount() != 3 {
+		t.Errorf("expected 3 runner calls, got %d", fr.CallCount())
 	}
 }
 

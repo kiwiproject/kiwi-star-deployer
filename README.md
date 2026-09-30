@@ -91,6 +91,10 @@ group_id = "org.kiwiproject"
 # Default: .generate-kiwi-changelog
 changelog_script = ".generate-kiwi-changelog"
 
+# Label applied to GitHub issues created for downstream POM dependency bumps.
+# Default: dependencies
+dependency_bump_issue_label = "dependencies"
+
 # Per-library timeout for mvn release:prepare release:perform.
 # Default: 1h
 maven_release_timeout = "1h"
@@ -149,6 +153,7 @@ depends_on = ["kiwi-parent", "kiwi-bom", "kiwi"]
 | `state_path` | string | `~/.kiwi-star-deployer/state.json` | Release run state file |
 | `group_id` | string | `org.kiwiproject` | Maven groupId |
 | `changelog_script` | string | `.generate-kiwi-changelog` | Changelog script name or path |
+| `dependency_bump_issue_label` | string | `dependencies` | Label applied to GitHub issues created for downstream POM dependency bumps |
 | `maven_release_timeout` | duration | `1h` | Per-library timeout for mvn release:prepare release:perform |
 | `maven_central_max_wait` | duration | `1h` | Max wait for Maven Central publication |
 | `maven_central_poll_interval` | duration | `30s` | Poll interval for Maven Central |
@@ -264,6 +269,7 @@ kiwi-star-deployer release [flags]
 | `--summary <libname=text>` | Prepend inline summary text to the changelog for a library (repeatable) |
 | `--summary-file <libname=/path>` | Prepend the contents of a file as a summary to the changelog for a library (repeatable) |
 | `--no-auto-skip` | Release every library, even ones with no changes since their last release (cannot be combined with `--resume`) |
+| `--create-dependency-bump-issues` | Create GitHub issues for downstream POM dependency version bumps (default `true`; pass `=false` to disable) |
 
 Before touching anything, `release` runs the same checks as `preflight`
 and `check-versions` and refuses to start if any fail (both are skipped
@@ -504,6 +510,20 @@ own stage, instead of a separate cycle per earlier stage. This matters most
 for `library-bom`, which typically depends on nearly every other library —
 without batching it would otherwise go through a separate commit and CI
 wait after almost every stage in the run.
+
+For each dependency in that commit, a GitHub issue is also created on the
+library's own repo (e.g. "Update kiwi to 5.4.0"), labeled with
+`dependency_bump_issue_label` and tagged with the library's own upcoming
+milestone, then referenced with a `Closes #NNN` line in the same commit.
+GitHub auto-closes the issue on push, and because kiwiproject-changelog
+builds its changelog entirely from issues and PRs tied to a milestone —
+never from commit content — this is what makes an automated dependency
+bump show up in the next changelog instead of going unreported. The
+library's own upcoming milestone must already exist (created by its
+previous release); a missing milestone fails the run rather than being
+created automatically. Pass `--create-dependency-bump-issues=false` to skip
+this and leave POM update commits exactly as they were before this feature
+existed.
 
 If any library in a stage fails, the entire run halts. Use `kiwi-star-deployer status`
 to see what completed, then `kiwi-star-deployer release --resume` to pick up

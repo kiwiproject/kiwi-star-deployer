@@ -11,6 +11,7 @@ import (
 	"github.com/kiwiproject/kiwi-star-deployer/internal/checkversions"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/ci"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/config"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/ghissue"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/mavencentral"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/plan"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/preflight"
@@ -28,13 +29,14 @@ var releaseCmd = &cobra.Command{
 }
 
 var (
-	resume           bool
-	skipLibs         []string
-	dryRun           bool
-	onlyLibs         []string
-	summaryFlags     []string
-	summaryFileFlags []string
-	noAutoSkip       bool
+	resume              bool
+	skipLibs            []string
+	dryRun              bool
+	onlyLibs            []string
+	summaryFlags        []string
+	summaryFileFlags    []string
+	noAutoSkip          bool
+	createDepBumpIssues bool
 )
 
 func runRelease(_ *cobra.Command, _ []string) error {
@@ -160,22 +162,26 @@ func runRelease(_ *cobra.Command, _ []string) error {
 	}
 
 	opts := release.Options{
-		GroupID:               cfg.Settings.GroupID,
-		LogDir:                resumeLogDir,
-		MavenTimeout:          time.Duration(cfg.Settings.MavenReleaseTimeout),
-		MaxWait:               time.Duration(cfg.Settings.MavenCentralMaxWait),
-		PollInterval:          time.Duration(cfg.Settings.MavenCentralPollInterval),
-		Checker:               mavencentral.New(),
-		ChangelogScript:       cfg.Settings.ChangelogScript,
-		StateWriter:           sw,
-		Completed:             completedVersions,
-		Skip:                  skipLibs,
-		ChangelogSummaries:    summaries,
-		ChangelogSummaryFiles: summaryFiles,
-		SkipUnchanged:         !noAutoSkip,
-		CIChecker:             &ci.GHChecker{Runner: r},
-		CIMaxWait:             time.Duration(cfg.Settings.CIMaxWait),
-		CIPollInterval:        time.Duration(cfg.Settings.CIPollInterval),
+		GroupID:                  cfg.Settings.GroupID,
+		LogDir:                   resumeLogDir,
+		MavenTimeout:             time.Duration(cfg.Settings.MavenReleaseTimeout),
+		MaxWait:                  time.Duration(cfg.Settings.MavenCentralMaxWait),
+		PollInterval:             time.Duration(cfg.Settings.MavenCentralPollInterval),
+		Checker:                  mavencentral.New(),
+		ChangelogScript:          cfg.Settings.ChangelogScript,
+		StateWriter:              sw,
+		Completed:                completedVersions,
+		Skip:                     skipLibs,
+		ChangelogSummaries:       summaries,
+		ChangelogSummaryFiles:    summaryFiles,
+		SkipUnchanged:            !noAutoSkip,
+		CIChecker:                &ci.GHChecker{Runner: r},
+		CIMaxWait:                time.Duration(cfg.Settings.CIMaxWait),
+		CIPollInterval:           time.Duration(cfg.Settings.CIPollInterval),
+		DependencyBumpIssueLabel: cfg.Settings.DependencyBumpIssueLabel,
+	}
+	if createDepBumpIssues {
+		opts.IssueCreator = &ghissue.Creator{Runner: r}
 	}
 
 	if err := release.Execute(os.Stdout, stages, ws, r, logBaseDir, opts); err != nil {
@@ -265,6 +271,7 @@ func init() {
 	releaseCmd.Flags().StringArrayVar(&summaryFlags, "summary", nil, "prepend summary text to changelog for a library (libname=text, repeatable)")
 	releaseCmd.Flags().StringArrayVar(&summaryFileFlags, "summary-file", nil, "prepend summary file to changelog for a library (libname=/path, repeatable)")
 	releaseCmd.Flags().BoolVar(&noAutoSkip, "no-auto-skip", false, "release all libraries even if unchanged since last release (cannot be combined with --resume)")
+	releaseCmd.Flags().BoolVar(&createDepBumpIssues, "create-dependency-bump-issues", true, "create GitHub issues for downstream POM dependency version bumps")
 }
 
 func parseSummaryFlags(flags []string, libs map[string]config.Library) (map[string]string, error) {

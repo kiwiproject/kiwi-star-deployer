@@ -32,6 +32,17 @@ type CIChecker interface {
 	Wait(w io.Writer, repo, commitSHA string, maxWait, interval time.Duration) error
 }
 
+// IssueCreator creates GitHub issues to track dependency-version bumps, so
+// they become visible to kiwiproject-changelog (which only reads issues/PRs
+// tied to a milestone, never commit content).
+type IssueCreator interface {
+	// ListOpenByMilestone returns title -> issue number for every open issue
+	// in milestone on repo. An error is returned if milestone does not exist.
+	ListOpenByMilestone(repo, milestone string) (map[string]int, error)
+	// Create creates one issue on repo and returns its number.
+	Create(repo, title, body, label, milestone string) (int, error)
+}
+
 // Options configures the release executor.
 type Options struct {
 	GroupID         string
@@ -51,6 +62,14 @@ type Options struct {
 	CIChecker      CIChecker
 	CIMaxWait      time.Duration
 	CIPollInterval time.Duration
+	// IssueCreator creates a GitHub issue for each dependency bumped in a
+	// downstream POM update, referenced by the commit that performs the bump
+	// so kiwiproject-changelog picks it up. If nil, issue creation is skipped
+	// and the POM-update commit message is unchanged from today.
+	IssueCreator IssueCreator
+	// DependencyBumpIssueLabel is the label applied to issues IssueCreator
+	// creates. Ignored if IssueCreator is nil.
+	DependencyBumpIssueLabel string
 	// LogDir pins the log directory for this run. When set (resume case), Execute
 	// reuses it so all logs for a logical run stay in one directory. When empty,
 	// Execute creates a new timestamped directory under logBaseDir.
@@ -268,7 +287,7 @@ func updateDownstreamPOMs(w io.Writer, released map[string]plan.Entry, stage []p
 		}
 		fmt.Fprintf(w, "  POM update %s: %s\n", entry.Name, strings.Join(depSummary, ", "))
 
-		if err := updatePOM(entry, deps, ws, r, logFile, opts.GroupID); err != nil {
+		if err := updatePOM(entry, deps, ws, r, logFile, opts); err != nil {
 			fmt.Fprintf(w, "  FAILED POM update %s\n", entry.Name)
 			fmt.Fprintf(w, "  log:   %s\n", logFile)
 			_ = opts.StateWriter.RecordFailed(entry.Name, state.StepPOMUpdate, err.Error())
@@ -297,7 +316,7 @@ func updateDownstreamPOMs(w io.Writer, released map[string]plan.Entry, stage []p
 	return nil
 }
 
-func updatePOM(entry plan.Entry, deps []plan.Entry, ws *workspace.Workspace, r runner.Runner, logFile string, groupID string) error {
+func updatePOM(entry plan.Entry, deps []plan.Entry, ws *workspace.Workspace, r runner.Runner, logFile string, opts Options) error {
 	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("opening log file: %w", err)
@@ -313,10 +332,27 @@ func updatePOM(entry plan.Entry, deps []plan.Entry, ws *workspace.Workspace, r r
 
 	repoDir := ws.RepoDir(entry.Name)
 
+	// Resolved before mvn touches the working copy, and before any commit is
+	// made: an unknown milestone is by far the most likely failure of this
+	// whole step (see createDependencyBumpIssues), and checking it here means
+	// that failure leaves the workspace exactly as clean as it was on entry,
+	// so a bare retry (or --resume) needs no manual workspace cleanup. Once
+	// mvn has run, any later failure (including gh issue create, despite its
+	// own retries) does leave the working copy dirty, same as a git add,
+	// commit, or push failure always has — recoverable per the "working copy
+	// has uncommitted changes" guidance workspace.Prepare already gives.
+	var existingIssues map[string]int
+	if opts.IssueCreator != nil {
+		existingIssues, err = opts.IssueCreator.ListOpenByMilestone(entry.Repo, entry.VersionPlan.ReleaseVersion)
+		if err != nil {
+			return fmt.Errorf("checking dependency bump issues: %w", err)
+		}
+	}
+
 	for _, dep := range deps {
 		if _, err := r.Run(runner.Options{
 			Command:    "mvn",
-			Args:       mavenVersionArgs(dep, groupID),
+			Args:       mavenVersionArgs(dep, opts.GroupID),
 			WorkingDir: repoDir,
 			Stdout:     out,
 			Stderr:     out,
@@ -347,9 +383,17 @@ func updatePOM(entry plan.Entry, deps []plan.Entry, ws *workspace.Workspace, r r
 		return fmt.Errorf("git add: %w", err)
 	}
 
+	var issueNumbers map[string]int
+	if opts.IssueCreator != nil {
+		issueNumbers, err = createDependencyBumpIssues(out, entry, deps, existingIssues, opts)
+		if err != nil {
+			return fmt.Errorf("creating dependency bump issues: %w", err)
+		}
+	}
+
 	if _, err := r.Run(runner.Options{
 		Command:    "git",
-		Args:       []string{"commit", "-m", buildPOMUpdateCommitMessage(deps)},
+		Args:       []string{"commit", "-m", buildPOMUpdateCommitMessage(deps, issueNumbers)},
 		WorkingDir: repoDir,
 		Stdout:     out,
 		Stderr:     out,
@@ -407,11 +451,48 @@ func mavenVersionArgs(dep plan.Entry, groupID string) []string {
 	}
 }
 
-func buildPOMUpdateCommitMessage(deps []plan.Entry) string {
+// createDependencyBumpIssues creates one GitHub issue per dep on entry's own
+// repo, tagged with entry's own upcoming milestone (its computed
+// ReleaseVersion, matching what kiwiproject-changelog will search for when
+// entry itself is next released) and opts.DependencyBumpIssueLabel. existing
+// is the title -> issue number map updatePOM already fetched via
+// ListOpenByMilestone before touching the working copy; an issue already open
+// with a matching title — left over from an earlier attempt that created it
+// but failed before committing — is reused instead of duplicated.
+func createDependencyBumpIssues(w io.Writer, entry plan.Entry, deps []plan.Entry, existing map[string]int, opts Options) (map[string]int, error) {
+	milestone := entry.VersionPlan.ReleaseVersion
+	issueNumbers := make(map[string]int, len(deps))
+	for _, dep := range deps {
+		title := fmt.Sprintf("Update %s to %s", dep.Name, dep.VersionPlan.ReleaseVersion)
+		if n, ok := existing[title]; ok {
+			fmt.Fprintf(w, "  issue already exists for %q (#%d); reusing\n", title, n)
+			issueNumbers[dep.Name] = n
+			continue
+		}
+		body := fmt.Sprintf("Dependency version bump performed automatically by kiwi-star-deployer as part of releasing %s.", entry.Name)
+		n, err := opts.IssueCreator.Create(entry.Repo, title, body, opts.DependencyBumpIssueLabel, milestone)
+		if err != nil {
+			return nil, fmt.Errorf("creating issue %q on %s: %w", title, entry.Repo, err)
+		}
+		fmt.Fprintf(w, "  created issue %q (#%d)\n", title, n)
+		issueNumbers[dep.Name] = n
+	}
+	return issueNumbers, nil
+}
+
+func buildPOMUpdateCommitMessage(deps []plan.Entry, issueNumbers map[string]int) string {
 	var sb strings.Builder
 	sb.WriteString("chore: update dependency versions\n\n")
 	for _, dep := range deps {
 		fmt.Fprintf(&sb, "- %s %s\n", dep.Name, dep.VersionPlan.ReleaseVersion)
+	}
+	if len(issueNumbers) > 0 {
+		sb.WriteString("\n")
+		for _, dep := range deps {
+			if n, ok := issueNumbers[dep.Name]; ok {
+				fmt.Fprintf(&sb, "Closes #%d\n", n)
+			}
+		}
 	}
 	return sb.String()
 }
