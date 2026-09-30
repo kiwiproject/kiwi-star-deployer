@@ -579,3 +579,36 @@ never pushed.
 
 Log files are unaffected by this and are managed separately; see
 [Log files](#log-files) above.
+
+## Releasing this tool itself
+
+This is a Go CLI, not a Java library, so it is not in `kiwi-star-deployer.toml`
+and is not released by running itself — the process below is entirely manual,
+and quite different from the Maven Central release flow it automates for
+every other kiwiproject repo.
+
+There is no version number to bump in source. `cmd/root.go` just declares
+`var version = "dev"`; the real value is injected at build time from the
+Makefile:
+
+```makefile
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+LDFLAGS := -X github.com/kiwiproject/kiwi-star-deployer/cmd.version=$(VERSION)
+```
+
+So the version is whatever the nearest git tag says — releasing a new version
+means creating that tag, then generating a changelog for it the same way this
+tool does for the libraries it releases:
+
+```sh
+git tag -s vX.Y.Z -m "Release X.Y.Z"
+git push origin vX.Y.Z
+
+.generate-kiwi-changelog -r kiwiproject/kiwi-star-deployer \
+  -p vPREVIOUS -R vX.Y.Z --output-type GITHUB \
+  --close-milestone --create-next-milestone NEXT \
+  --add-v-prefix-to-revisions
+```
+
+`make install` afterward picks up the new version automatically, since it
+re-runs `git describe --tags` against whatever `main` is now at.
