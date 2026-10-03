@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,6 +61,9 @@ func TestWait_availableImmediately(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if !strings.Contains(buf.String(), "kiwi 2.5.1 is now available in Maven Central (took") {
+		t.Errorf("expected availability message in output:\n%s", buf.String())
+	}
 }
 
 func TestWait_availableAfterRetry(t *testing.T) {
@@ -83,6 +87,9 @@ func TestWait_availableAfterRetry(t *testing.T) {
 	if calls < 3 {
 		t.Errorf("expected at least 3 calls, got %d", calls)
 	}
+	if !strings.Contains(buf.String(), "kiwi 2.5.1 is now available in Maven Central (took") {
+		t.Errorf("expected availability message in output:\n%s", buf.String())
+	}
 }
 
 func TestWait_timeout(t *testing.T) {
@@ -96,5 +103,8 @@ func TestWait_timeout(t *testing.T) {
 	err := c.Wait(&buf, "org.kiwiproject", "kiwi", "2.5.1", 50*time.Millisecond, time.Millisecond)
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+	if strings.Contains(buf.String(), "is now available") {
+		t.Errorf("expected no availability message on timeout:\n%s", buf.String())
 	}
 }
