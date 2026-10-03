@@ -61,10 +61,12 @@ func (c *Checker) Available(groupID, artifactID, version string) (found bool, er
 // Progress messages are written to w.
 func (c *Checker) Wait(w io.Writer, groupID, artifactID, version string, maxWait, interval time.Duration) error {
 	fmt.Fprintf(w, "  checking Maven Central: %s %s (max wait: %v, retry every: %v)\n", artifactID, version, maxWait, interval)
-	deadline := time.Now().Add(maxWait)
+	start := time.Now()
+	deadline := start.Add(maxWait)
 	for {
 		found, err := c.Available(groupID, artifactID, version)
 		if found {
+			fmt.Fprintf(w, "  %s %s is now available in Maven Central (took %v)\n", artifactID, version, time.Since(start).Round(time.Second))
 			return nil
 		}
 		if err == nil {
