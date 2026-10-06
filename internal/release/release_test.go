@@ -662,6 +662,38 @@ func TestExecute_verifyMvnArgs(t *testing.T) {
 	}
 }
 
+// TestExecute_mavenReleaseInheritsStdin proves the Maven release command is
+// the one call site that sets InheritStdin, since that's what gives mvn's
+// nested gpg:sign a real stdin instead of the /dev/null default that caused
+// kiwiproject/kiwi-star-deployer#85. No other call this test exercises
+// (git describe, changelog) should set it.
+func TestExecute_mavenReleaseInheritsStdin(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.5.0")
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), defaultOpts()) //nolint:errcheck
+
+	mvnCall := fr.Calls[1] // Calls[0]=git describe, Calls[1]=mvn, Calls[2]=changelog
+	if mvnCall.Command != "mvn" {
+		t.Fatalf("expected mvn, got: %s", mvnCall.Command)
+	}
+	if !mvnCall.InheritStdin {
+		t.Error("expected the Maven release command to set InheritStdin")
+	}
+	for i, call := range fr.Calls {
+		if call.Command != "mvn" && call.InheritStdin {
+			t.Errorf("expected only the mvn call to set InheritStdin; call %d (%s) also set it", i, call.Command)
+		}
+	}
+}
+
 func TestExecute_mavenTimeoutPassedToRunner(t *testing.T) {
 	dir := t.TempDir()
 	ws := workspace.New(dir, &prepareSuccessRunner{})

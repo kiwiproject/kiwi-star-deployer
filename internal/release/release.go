@@ -568,10 +568,11 @@ func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, 
 			"-DdevelopmentVersion=" + vp.NextDevVersion,
 			"-e",
 		},
-		WorkingDir: repoDir,
-		Stdout:     out,
-		Stderr:     out,
-		Timeout:    opts.MavenTimeout,
+		WorkingDir:   repoDir,
+		Stdout:       out,
+		Stderr:       out,
+		Timeout:      opts.MavenTimeout,
+		InheritStdin: true,
 	}); err != nil {
 		return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepMavenRelease, err: fmt.Errorf("mvn release: %w", err)}
 	}

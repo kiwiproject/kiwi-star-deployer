@@ -61,6 +61,10 @@ func TestOsRunner_timeoutCancelsCommand(t *testing.T) {
 	}
 }
 
+// InheritStdin behavior (real tty required for most of it, including the
+// fallback-when-not-a-tty case) is tested in process_group_unix_test.go,
+// alongside this package's other Unix-specific process/terminal tests.
+
 func TestFakeRunner_panicOnUnexpectedCall(t *testing.T) {
 	f := &runner.FakeRunner{}
 	defer func() {
