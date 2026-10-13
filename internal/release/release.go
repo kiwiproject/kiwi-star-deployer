@@ -62,6 +62,12 @@ type Options struct {
 	CIChecker      CIChecker
 	CIMaxWait      time.Duration
 	CIPollInterval time.Duration
+	// WarmSigning is called before each library's release to make gpg-agent
+	// cache the signing passphrase. The release runs mvn -B, which makes
+	// maven-gpg-plugin forbid pinentry, so signing only works from a warm
+	// cache. A failure fails that library before anything is tagged or pushed.
+	// If nil, warming is skipped.
+	WarmSigning func() error
 	// IssueCreator creates a GitHub issue for each dependency bumped in a
 	// downstream POM update, referenced by the commit that performs the bump
 	// so kiwiproject-changelog picks it up. If nil, issue creation is skipped
@@ -548,6 +554,12 @@ func releaseLibrary(entry plan.Entry, ws *workspace.Workspace, r runner.Runner, 
 
 	repoDir := ws.RepoDir(entry.Name)
 	vp := entry.VersionPlan
+
+	if opts.WarmSigning != nil {
+		if err := opts.WarmSigning(); err != nil {
+			return libraryResult{name: entry.Name, logFile: logFile, output: buf.String(), failedStep: state.StepMavenRelease, err: err}
+		}
+	}
 
 	// Capture the previous release tag before mvn creates the new one.
 	previousRev, err := ensurePreviousReleaseTag(r, repoDir, "HEAD")

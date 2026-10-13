@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -275,6 +276,91 @@ func TestExecute_mvnFailureHalts(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "FAILED") {
 		t.Errorf("expected FAILED in output:\n%s", out)
+	}
+}
+
+func TestExecute_warmsSigningBeforeAnyCommand(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.5.0")
+
+	var callsAtWarm []int
+	opts := defaultOpts()
+	opts.WarmSigning = func() error {
+		callsAtWarm = append(callsAtWarm, fr.CallCount())
+		return nil
+	}
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	var buf bytes.Buffer
+	if err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(callsAtWarm) != 1 || callsAtWarm[0] != 0 {
+		t.Errorf("expected one warm-up before any runner call, got runner call counts %v at warm-up", callsAtWarm)
+	}
+}
+
+func TestExecute_warmsSigningOncePerLibrary(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.5.0")
+	addLibraryResponses(fr, "v1.0.0")
+
+	var warmed atomic.Int32
+	opts := defaultOpts()
+	opts.WarmSigning = func() error {
+		warmed.Add(1)
+		return nil
+	}
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+		plan.Entry{Name: "kiwi-bom", Repo: "kiwiproject/kiwi-bom", Stage: 1, VersionPlan: mustPlan("kiwi-bom", "1.0.1-SNAPSHOT")},
+	)
+
+	var buf bytes.Buffer
+	if err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := warmed.Load(); got != 2 {
+		t.Errorf("expected 2 warm-ups (one per library), got %d", got)
+	}
+}
+
+func TestExecute_warmSigningFailureHaltsBeforeAnyCommand(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	// No responses queued: FakeRunner panics if any command (git describe,
+	// mvn) runs after the warm-up fails.
+	fr := &runner.FakeRunner{}
+
+	opts := defaultOpts()
+	opts.WarmSigning = func() error { return errors.New("gpg could not sign: No pinentry") }
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	out := buf.String()
+	if !strings.Contains(out, "FAILED") || !strings.Contains(out, "No pinentry") {
+		t.Errorf("expected FAILED and the warm-up error in output:\n%s", out)
+	}
+	if fr.CallCount() != 0 {
+		t.Errorf("expected no runner calls after warm-up failure, got %d", fr.CallCount())
 	}
 }
 
