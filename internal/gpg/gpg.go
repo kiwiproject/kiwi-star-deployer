@@ -26,6 +26,9 @@ const warmTimeout = 2 * time.Minute
 // flags deliberately omit that option, so pinentry may run here (pinentry-mac
 // answers silently from the Keychain) and fill the cache for the later signing.
 func Warm(r runner.Runner) error {
+	// Stdin is deliberately left unset: os/exec then connects the child's stdin
+	// to the null device, so gpg signs an empty message instead of waiting for
+	// input from the terminal.
 	res, err := r.Run(runner.Options{
 		Command: "gpg",
 		Args:    []string{"--armor", "--detach-sign", "--output", os.DevNull},
