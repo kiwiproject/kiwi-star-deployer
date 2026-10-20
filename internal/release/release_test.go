@@ -963,6 +963,71 @@ func TestExecute_skippedVersionUsedInPOMUpdate(t *testing.T) {
 	}
 }
 
+func TestExecute_completedLibraryGetsNoPOMUpdate(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	// No responses queued: any runner call (mvn, git, CI SHA lookup) would panic.
+	fr := &runner.FakeRunner{}
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Type: "parent-pom", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi-bom", Repo: "kiwiproject/kiwi-bom", Type: "bom", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi-bom", "3.3.5-SNAPSHOT")},
+	)
+
+	// The milestone for a completed library is already closed; looking it up
+	// is what failed a resume before completed libraries were left alone.
+	ic := &fakeIssueCreator{listErr: errors.New(`milestone "3.3.5" does not exist as an open milestone on kiwiproject/kiwi-bom; create it before releasing`)}
+	opts := defaultOpts()
+	opts.IssueCreator = ic
+	opts.Completed = map[string]string{"kiwi-parent": "3.0.0", "kiwi-bom": "3.3.5"}
+
+	var buf bytes.Buffer
+	if err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(buf.String(), "POM update") {
+		t.Errorf("expected no POM update for a completed library, got:\n%s", buf.String())
+	}
+	if fr.CallCount() != 0 {
+		t.Errorf("expected 0 runner calls, got %d", fr.CallCount())
+	}
+}
+
+func TestExecute_skippedLibraryGetsNoPOMUpdate(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: "v3.3.5\n"}, nil) // git describe for kiwi-bom (--skip)
+	addLibraryResponses(fr, "v2.9.0")                       // kiwi-parent release
+	// kiwi-bom is skipped: no POM update, no release calls
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Type: "parent-pom", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi-bom", Repo: "kiwiproject/kiwi-bom", Type: "bom", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi-bom", "3.3.5-SNAPSHOT")},
+	)
+
+	// A --skip'd library was released outside this run at a version the plan
+	// does not know, so its milestone is not the plan-computed one.
+	ic := &fakeIssueCreator{listErr: errors.New(`milestone "3.3.5" does not exist as an open milestone on kiwiproject/kiwi-bom; create it before releasing`)}
+	opts := defaultOpts()
+	opts.IssueCreator = ic
+	opts.Skip = []string{"kiwi-bom"}
+
+	var buf bytes.Buffer
+	if err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(buf.String(), "POM update") {
+		t.Errorf("expected no POM update for a --skip'd library, got:\n%s", buf.String())
+	}
+	// 1 (git describe for --skip) + 3 (kiwi-parent release)
+	if fr.CallCount() != 4 {
+		t.Errorf("expected 4 runner calls, got %d", fr.CallCount())
+	}
+}
+
 func TestExecute_ciVerificationPassesAfterPOMUpdate(t *testing.T) {
 	dir := t.TempDir()
 	ws := workspace.New(dir, &prepareSuccessRunner{})
