@@ -6,12 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kiwiproject/kiwi-star-deployer/internal/checkversions"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/ci"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/config"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/ghissue"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/gpg"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/mavencentral"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/plan"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/preflight"
@@ -179,6 +181,7 @@ func runRelease(_ *cobra.Command, _ []string) error {
 		CIMaxWait:                time.Duration(cfg.Settings.CIMaxWait),
 		CIPollInterval:           time.Duration(cfg.Settings.CIPollInterval),
 		DependencyBumpIssueLabel: cfg.Settings.DependencyBumpIssueLabel,
+		WarmSigning:              serializedWarm(r),
 	}
 	if createDepBumpIssues {
 		opts.IssueCreator = &ghissue.Creator{Runner: r}
@@ -331,4 +334,16 @@ func parseSummaryFileFlags(flags []string, libs map[string]config.Library) (map[
 		result[name] = path
 	}
 	return result, nil
+}
+
+// serializedWarm returns a gpg warm-up that runs one at a time: libraries in a
+// stage release concurrently, and with a cold agent only the first warm-up
+// should have to unlock the key. The rest then find it cached and return at once.
+func serializedWarm(r runner.Runner) func() error {
+	var mu sync.Mutex
+	return func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		return gpg.Warm(r)
+	}
 }

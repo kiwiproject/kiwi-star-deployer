@@ -27,6 +27,7 @@ The following tools must be installed and on your PATH before running:
 - `git`
 - `gh` (GitHub CLI) version 2.40.0 or later, authenticated via `gh auth login`
 - `mvn` (Maven)
+- `gpg`, able to sign with your release key (see [GPG signing](#gpg-signing))
 - `.generate-kiwi-changelog` (the [kiwiproject changelog script](https://github.com/kiwiproject/kiwiproject-changelog))
 
 Run `kiwi-star-deployer preflight` at any time to verify all prerequisites.
@@ -404,11 +405,36 @@ Example output:
 [PASS]  gh auth
 [PASS]  mvn
 [PASS]  .generate-kiwi-changelog
+[PASS]  gpg signing
 
-Note: GPG signing and Maven Central publishing credentials cannot be verified
-in advance; mvn release:perform is the first step that exercises them. Ensure
-gpg-agent and ~/.m2/settings.xml are configured before the first release.
+Note: Maven Central publishing credentials cannot be verified in advance;
+mvn release:perform is the first step that exercises them. Ensure
+~/.m2/settings.xml is configured before the first release.
 ```
+
+#### GPG signing
+
+The release runs Maven with `-B` (non-interactive). In that mode
+maven-gpg-plugin passes `--pinentry-mode error` to gpg, which forbids
+gpg-agent from launching pinentry: signing works only if the agent already
+has the passphrase cached, and otherwise fails with `gpg: signing failed: No
+pinentry`. (Running `mvn` interactively, as a hand-run release script does,
+avoids this because pinentry is allowed to run.)
+
+So the `gpg signing` check signs an empty message with pinentry allowed
+and leaves the passphrase cached. This works with a GUI pinentry such as
+pinentry-mac (which answers silently from a saved Keychain entry, or shows
+a dialog); a terminal-based pinentry is not supported, because the check
+has no terminal. It signs with gpg's default key, so if Maven signs with a
+different one (`gpg.keyname`), set `default-key` in `~/.gnupg/gpg.conf` to
+match. `release` runs this
+check at startup and again before each library's Maven release, and fails
+that library before anything is tagged or pushed if gpg cannot sign.
+
+The cache is idle-timeout based. If a library's build takes longer than
+`default-cache-ttl` between the warm-up and signing, raise it in
+`~/.gnupg/gpg-agent.conf` (for example `default-cache-ttl 3600`), then run
+`gpgconf --reload gpg-agent`.
 
 ---
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/kiwiproject/kiwi-star-deployer/internal/gpg"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/runner"
 )
 
@@ -31,6 +32,7 @@ func RunAll(r runner.Runner, changelogScript string) []Result {
 		checkGHAuth(r),
 		checkInPath("mvn"),
 		checkInPath(changelogScript),
+		checkGPGSigning(r),
 	}
 }
 
@@ -58,9 +60,9 @@ func Print(w io.Writer, results []Result) {
 		fmt.Fprintf(tw, "%s\t%s\t%s\n", status, r.Name, msg)
 	}
 	_ = tw.Flush()
-	fmt.Fprintln(w, "\nNote: GPG signing and Maven Central publishing credentials cannot be verified")
-	fmt.Fprintln(w, "in advance; mvn release:perform is the first step that exercises them. Ensure")
-	fmt.Fprintln(w, "gpg-agent and ~/.m2/settings.xml are configured before the first release.")
+	fmt.Fprintln(w, "\nNote: Maven Central publishing credentials cannot be verified in advance;")
+	fmt.Fprintln(w, "mvn release:perform is the first step that exercises them. Ensure")
+	fmt.Fprintln(w, "~/.m2/settings.xml is configured before the first release.")
 }
 
 func checkInPath(name string) Result {
@@ -72,6 +74,15 @@ func checkInPath(name string) Result {
 		}
 	}
 	return Result{Name: name, OK: true}
+}
+
+// checkGPGSigning also leaves the signing passphrase cached in gpg-agent,
+// which the release's non-interactive Maven build depends on.
+func checkGPGSigning(r runner.Runner) Result {
+	if err := gpg.Warm(r); err != nil {
+		return Result{Name: "gpg signing", OK: false, Message: err.Error()}
+	}
+	return Result{Name: "gpg signing", OK: true}
 }
 
 func checkGHVersion(r runner.Runner) Result {

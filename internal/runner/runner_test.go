@@ -1,6 +1,7 @@
 package runner_test
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -69,4 +70,29 @@ func TestFakeRunner_panicOnUnexpectedCall(t *testing.T) {
 		}
 	}()
 	_, _ = f.Run(runner.Options{Command: "git", Args: []string{"fetch"}})
+}
+
+// Callers such as gpg.Warm rely on a command's stdin being the null device
+// (so it reads end-of-input at once), not the parent's stdin. Point os.Stdin
+// at a pipe that never produces input or EOF: if the runner passed it on,
+// cat would block until the timeout kills it.
+func TestOsRunner_childStdinIsNullDevice(t *testing.T) {
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	t.Cleanup(func() { _ = pr.Close(); _ = pw.Close() })
+
+	origStdin := os.Stdin
+	os.Stdin = pr
+	t.Cleanup(func() { os.Stdin = origStdin })
+
+	r := runner.NewOsRunner()
+	result, err := r.Run(runner.Options{Command: "cat", Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("expected cat to see end-of-input immediately, got error: %v", err)
+	}
+	if result.Stdout != "" {
+		t.Errorf("expected no output, got %q", result.Stdout)
+	}
 }
