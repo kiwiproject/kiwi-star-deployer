@@ -190,7 +190,9 @@ Duration values use Go duration syntax: `30s`, `5m`, `1h30m`.
 > or a differently-named property, the update will silently do nothing and the
 > release will proceed with the stale version. The only exception is `parent-pom`
 > dependencies, which are declared as a literal version in `<parent>` and updated
-> via `mvn versions:use-dep-version`.
+> via `mvn versions:update-parent`. That goal changes only the root POM's
+> `<parent>` (submodules that inherit from the root POM are left alone), so a
+> `parent-pom` dependency must be the root POM's actual parent.
 
 ## Changelog tool configuration
 

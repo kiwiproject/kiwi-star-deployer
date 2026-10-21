@@ -366,7 +366,7 @@ func updatePOM(entry plan.Entry, deps []plan.Entry, ws *workspace.Workspace, r r
 	for _, dep := range deps {
 		if _, err := r.Run(runner.Options{
 			Command:    "mvn",
-			Args:       mavenVersionArgs(dep, opts.GroupID),
+			Args:       mavenVersionArgs(dep),
 			WorkingDir: repoDir,
 			Stdout:     out,
 			Stderr:     out,
@@ -432,27 +432,30 @@ func updatePOM(entry plan.Entry, deps []plan.Entry, ws *workspace.Workspace, r r
 // in a downstream POM.
 //
 // parent-pom deps are declared as a literal version in <parent>, so
-// versions:use-dep-version handles them. -DprocessParent=true is required: the
-// mojo's processParent parameter defaults to false, without which the <parent>
-// element is silently left unchanged. -DforceVersion=true skips the mojo's
-// repository-metadata availability check, which can lag behind actual artifact
-// publication right after a release; the artifact has already been verified
-// directly against Maven Central before any downstream POM update runs.
+// versions:update-parent handles them. -N (non-recursive) limits it to the root
+// POM: in a multi-module build the submodules' <parent> points at the root
+// POM, not at the parent-pom dep, and a reactor-wide update (as
+// versions:use-dep-version -DprocessParent=true does) rewrites those to the
+// dep's version, which breaks the build. -DskipResolution=true sets exactly
+// the given version without a repository lookup, as -DforceVersion=true did for
+// the old goal: without it parentVersion is only the bottom of a range, and
+// repository metadata can lag behind actual artifact publication right after a
+// release; the artifact has already been verified directly against Maven
+// Central before any downstream POM update runs.
 // All other dep types (bom, library-bom, regular libraries) are declared via a
 // property named exactly <artifactId>.version (e.g., kiwi-bom.version,
 // kiwi.version), so versions:set-property is required. If a dep deviates from
 // this convention and uses a literal version element, set-property will
 // silently do nothing and the git status check in updatePOM will skip the
 // commit, surfacing the mismatch without corrupting the POM.
-func mavenVersionArgs(dep plan.Entry, groupID string) []string {
+func mavenVersionArgs(dep plan.Entry) []string {
 	if dep.Type == config.TypeParentPOM {
 		return []string{
 			"-B",
-			"versions:use-dep-version",
-			"-Dincludes=" + groupID + ":" + dep.Name,
-			"-DdepVersion=" + dep.VersionPlan.ReleaseVersion,
-			"-DprocessParent=true",
-			"-DforceVersion=true",
+			"-N",
+			"versions:update-parent",
+			"-DparentVersion=" + dep.VersionPlan.ReleaseVersion,
+			"-DskipResolution=true",
 			"-DgenerateBackupPoms=false",
 		}
 	}

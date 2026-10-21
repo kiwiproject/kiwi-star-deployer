@@ -689,15 +689,19 @@ func TestExecute_verifyPOMUpdateArgs(t *testing.T) {
 	}
 	versionArgs := strings.Join(mvnVersionsCall.Args, " ")
 	for _, want := range []string{
-		"versions:use-dep-version",
-		"-Dincludes=org.kiwiproject:kiwi-parent",
-		"-DdepVersion=3.0.0",
-		"-DprocessParent=true",
-		"-DforceVersion=true",
+		"-N", // root POM only: submodule parents point at the root POM, not kiwi-parent
+		"versions:update-parent",
+		"-DparentVersion=3.0.0",
+		"-DskipResolution=true",
 		"-DgenerateBackupPoms=false",
 	} {
 		if !strings.Contains(versionArgs, want) {
 			t.Errorf("expected %q in mvn versions args: %s", want, versionArgs)
+		}
+	}
+	for _, notWant := range []string{"versions:use-dep-version", "-Dincludes=", "-DprocessParent", "-DforceVersion"} {
+		if strings.Contains(versionArgs, notWant) {
+			t.Errorf("unexpected %q in parent-pom mvn args: %s", notWant, versionArgs)
 		}
 	}
 
@@ -955,8 +959,8 @@ func TestExecute_skippedVersionUsedInPOMUpdate(t *testing.T) {
 
 	mvnVersionsCall := fr.Calls[0]
 	versionArgs := strings.Join(mvnVersionsCall.Args, " ")
-	if !strings.Contains(versionArgs, "-DdepVersion=2.9.0") {
-		t.Errorf("expected -DdepVersion=2.9.0 in POM update args: %s", versionArgs)
+	if !strings.Contains(versionArgs, "-DparentVersion=2.9.0") {
+		t.Errorf("expected -DparentVersion=2.9.0 in POM update args: %s", versionArgs)
 	}
 	if strings.Contains(versionArgs, "3.0.0") {
 		t.Errorf("unexpected 3.0.0 in POM update args: %s", versionArgs)
