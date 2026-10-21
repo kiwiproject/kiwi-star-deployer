@@ -230,23 +230,50 @@ func TestGHChecker_completionTimesOut(t *testing.T) {
 	}
 }
 
-func TestGHChecker_listRunsError(t *testing.T) {
+func TestGHChecker_listRunsErrorsInARowFail(t *testing.T) {
 	fr := &runner.FakeRunner{}
-	fr.AddResponse(nil, errors.New("exit status 1"))
+	for range 3 {
+		fr.AddResponse(nil, errors.New("exit status 1"))
+	}
 
-	err := newChecker(fr).Wait(&bytes.Buffer{}, "kiwiproject/kiwi", "abc123def456", time.Minute, time.Millisecond)
+	var buf bytes.Buffer
+	err := newChecker(fr).Wait(&buf, "kiwiproject/kiwi", "abc123def456", time.Minute, time.Millisecond)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "gh run list") {
-		t.Errorf("expected 'gh run list' in error: %v", err)
+	if !strings.Contains(err.Error(), "gh run list") || !strings.Contains(err.Error(), "giving up after 3 failed polls") {
+		t.Errorf("expected 'gh run list' and the give-up count in error: %v", err)
+	}
+	if fr.CallCount() != 3 {
+		t.Errorf("expected 3 gh calls before giving up, got %d", fr.CallCount())
+	}
+	if !strings.Contains(buf.String(), "poll failed") {
+		t.Errorf("expected poll failure notice in output:\n%s", buf.String())
 	}
 }
 
-func TestGHChecker_viewRunError(t *testing.T) {
+func TestGHChecker_listRunsErrorIsTolerated(t *testing.T) {
 	fr := &runner.FakeRunner{}
-	fr.AddResponse(&runner.Result{Stdout: runListOne}, nil)
-	fr.AddResponse(nil, errors.New("exit status 1"))
+	fr.AddResponse(nil, errors.New("exit status 1"))        // gh run list: transient failure
+	fr.AddResponse(&runner.Result{Stdout: runListOne}, nil) // gh run list
+	fr.AddResponse(&runner.Result{Stdout: runSuccess}, nil) // gh run view
+
+	var buf bytes.Buffer
+	err := newChecker(fr).Wait(&buf, "kiwiproject/kiwi", "abc123def456", time.Minute, time.Millisecond)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "poll failed") {
+		t.Errorf("expected poll failure notice in output:\n%s", buf.String())
+	}
+}
+
+func TestGHChecker_viewRunErrorsInARowFail(t *testing.T) {
+	fr := &runner.FakeRunner{}
+	for range 3 {
+		fr.AddResponse(&runner.Result{Stdout: runListOne}, nil) // gh run list
+		fr.AddResponse(nil, errors.New("exit status 1"))        // gh run view fails
+	}
 
 	err := newChecker(fr).Wait(&bytes.Buffer{}, "kiwiproject/kiwi", "abc123def456", time.Minute, time.Millisecond)
 	if err == nil {
@@ -254,6 +281,90 @@ func TestGHChecker_viewRunError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "gh run view") {
 		t.Errorf("expected 'gh run view' in error: %v", err)
+	}
+	if fr.CallCount() != 6 {
+		t.Errorf("expected 6 gh calls before giving up, got %d", fr.CallCount())
+	}
+}
+
+func TestGHChecker_viewRunErrorIsTolerated(t *testing.T) {
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: runListOne}, nil) // gh run list
+	fr.AddResponse(nil, errors.New("exit status 1"))        // gh run view: transient failure
+	fr.AddResponse(&runner.Result{Stdout: runListOne}, nil) // gh run list
+	fr.AddResponse(&runner.Result{Stdout: runSuccess}, nil) // gh run view
+
+	err := newChecker(fr).Wait(&bytes.Buffer{}, "kiwiproject/kiwi", "abc123def456", time.Minute, time.Millisecond)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// A failed gh run view for one pending run must not stop the other pending
+// runs from being checked in the same cycle.
+func TestGHChecker_viewRunErrorStillChecksOtherRuns(t *testing.T) {
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: runListTwo}, nil) // gh run list: two runs
+	fr.AddResponse(nil, errors.New("exit status 1"))        // gh run view: first run fails
+	fr.AddResponse(&runner.Result{Stdout: runSuccess}, nil) // gh run view: second run completes
+	fr.AddResponse(&runner.Result{Stdout: runListTwo}, nil) // gh run list
+	fr.AddResponse(&runner.Result{Stdout: runSuccess}, nil) // gh run view: the remaining run
+
+	err := newChecker(fr).Wait(&bytes.Buffer{}, "kiwiproject/kiwi", "abc123def456", time.Minute, time.Millisecond)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fr.CallCount() != 5 {
+		t.Errorf("expected 5 gh calls, got %d", fr.CallCount())
+	}
+}
+
+func TestGHChecker_timeoutReportsLastPollError(t *testing.T) {
+	fr := &runner.FakeRunner{}
+	for range 1000 {
+		fr.AddResponse(nil, errors.New("exit status 1"))
+	}
+
+	checker := &ci.GHChecker{Runner: fr, MaxPollErrors: 1000}
+	err := checker.Wait(&bytes.Buffer{}, "kiwiproject/kiwi", "abc123def456", 30*time.Millisecond, 5*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "timed out") || !strings.Contains(err.Error(), "last poll error") {
+		t.Errorf("expected a timeout that names the last poll error: %v", err)
+	}
+}
+
+// Only consecutive failures count: three failed polls separated by successful
+// ones must not fail the wait.
+func TestGHChecker_successfulPollResetsErrorCount(t *testing.T) {
+	fr := &runner.FakeRunner{}
+	for range 2 {
+		fr.AddResponse(nil, errors.New("exit status 1"))           // gh run list fails
+		fr.AddResponse(&runner.Result{Stdout: runListOne}, nil)    // gh run list
+		fr.AddResponse(&runner.Result{Stdout: runInProgress}, nil) // gh run view: a good poll
+	}
+	fr.AddResponse(nil, errors.New("exit status 1"))        // third failure, not consecutive with the others
+	fr.AddResponse(&runner.Result{Stdout: runListOne}, nil) // gh run list
+	fr.AddResponse(&runner.Result{Stdout: runSuccess}, nil) // gh run view
+
+	err := newChecker(fr).Wait(&bytes.Buffer{}, "kiwiproject/kiwi", "abc123def456", time.Minute, time.Millisecond)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGHChecker_maxPollErrorsOneFailsOnFirstError(t *testing.T) {
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(nil, errors.New("exit status 1"))
+
+	checker := &ci.GHChecker{Runner: fr, MaxPollErrors: 1}
+	err := checker.Wait(&bytes.Buffer{}, "kiwiproject/kiwi", "abc123def456", time.Minute, time.Millisecond)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if fr.CallCount() != 1 {
+		t.Errorf("expected 1 gh call, got %d", fr.CallCount())
 	}
 }
 

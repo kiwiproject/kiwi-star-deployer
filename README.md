@@ -112,7 +112,9 @@ maven_central_poll_interval = "30s"
 # Default: 30m
 ci_max_wait = "30m"
 
-# How often to poll GitHub Actions while waiting for CI to complete.
+# How often to poll GitHub Actions while waiting for CI to complete. A poll
+# that fails (for example on a transient GitHub error) is retried on the next
+# cycle; the wait fails only after three failed polls in a row.
 # Default: 30s
 ci_poll_interval = "30s"
 
