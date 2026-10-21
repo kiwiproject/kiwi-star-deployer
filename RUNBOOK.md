@@ -27,7 +27,7 @@ the right scenario below:
 | `maven-release`       | Died during `release:prepare`/`release:perform` itself — [Scenario 2](#scenario-2-originmain-left-on-a-non-snapshot-version) |
 | `maven-central-verify` | The release was pushed, but whether it reached Central is unconfirmed — [Scenario 1](#scenario-1-release-pushed-but-maven-central-status-unknown) |
 | `changelog`            | Release confirmed on Central, changelog/GitHub-release/milestone step didn't finish — [Scenario 4](#scenario-4-milestone-left-stale-after-a-partial-changelog-run) |
-| `pom-update` / `ci-verify` | A downstream library's dependency bump or its CI failed — not a release failure for the library itself; fix the downstream repo (or its CI) and run `--resume`, which re-verifies the new commit |
+| `pom-update` / `ci-verify` | A downstream library's dependency bump or its CI failed — not a release failure for the library itself; fix the downstream repo (or its CI) and run `--resume`, which re-verifies the new commit. A transient failure, such as the `git push` of the bump commit failing on a network or GitHub error, needs no fix first: `--resume` resets the local clone to `origin/main` (discarding the unpushed commit), redoes the bump, reuses any still-open bump issues already created, and pushes again. If `--resume` then fails with an "uncommitted changes" error, run the cleanup command in that message and resume again |
 
 ## Scenario 1: release pushed, but Maven Central status unknown
 
