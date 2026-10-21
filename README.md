@@ -333,12 +333,15 @@ kiwi-star-deployer release --resume --skip kiwi-test
 
 `--skip` asserts that the library's release already succeeded: the
 version is taken from its latest release tag and must exist on Maven
-Central, otherwise the run refuses to start. To recover a library whose
-release *failed*, resume without `--skip` — auto-skip detection verifies
-Maven Central and re-runs the changelog step as needed, which `--skip`
-would bypass. For recovery procedures beyond a plain `--resume` — a
-release that died before Maven Central confirmed it, or before
-`release:prepare` even finished — see [RUNBOOK.md](RUNBOOK.md).
+Central, otherwise the run refuses to start. A library that is skipped
+this way, or that already completed earlier in the run, gets no POM update
+and no CI verification on resume, since its release is already final; its
+released version is still used to update the libraries that depend on it.
+To recover a library whose release *failed*, resume without `--skip` —
+auto-skip detection verifies Maven Central and re-runs the changelog step
+as needed, which `--skip` would bypass. For recovery procedures beyond a
+plain `--resume` — a release that died before Maven Central confirmed it,
+or before `release:prepare` even finished — see [RUNBOOK.md](RUNBOOK.md).
 
 Major release with per-library changelog summaries:
 

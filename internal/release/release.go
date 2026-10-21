@@ -151,7 +151,7 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 	released := make(map[string]plan.Entry)
 	for i, stage := range stages {
 		if i > 0 {
-			if err := updateDownstreamPOMs(w, released, stage, ws, r, logDir, opts); err != nil {
+			if err := updateDownstreamPOMs(w, released, skipVersions, stage, ws, r, logDir, opts); err != nil {
 				return err
 			}
 		}
@@ -274,8 +274,16 @@ func buildSkipVersions(w io.Writer, opts Options, stages [][]plan.Entry, ws *wor
 // not just the immediately preceding one — so each entry's dependency bumps
 // land in a single batch at the last possible moment rather than one cycle
 // per earlier stage that happened to release one of its dependencies.
-func updateDownstreamPOMs(w io.Writer, released map[string]plan.Entry, stage []plan.Entry, ws *workspace.Workspace, r runner.Runner, logDir string, opts Options) error {
+//
+// Entries in skipVersions (completed earlier in the run, or declared released
+// with --skip) are left alone: their release is finalized, so a new commit on
+// main would correspond to nothing that was released, and their milestone is
+// already closed, which would fail the dependency-bump issue lookup.
+func updateDownstreamPOMs(w io.Writer, released map[string]plan.Entry, skipVersions map[string]string, stage []plan.Entry, ws *workspace.Workspace, r runner.Runner, logDir string, opts Options) error {
 	for _, entry := range stage {
+		if _, alreadyReleased := skipVersions[entry.Name]; alreadyReleased {
+			continue
+		}
 		var deps []plan.Entry
 		for _, depName := range entry.DependsOn {
 			if re, ok := released[depName]; ok {
