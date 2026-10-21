@@ -1858,6 +1858,37 @@ func TestExecute_autoSkipGitHubReleaseCheckErrorHalts(t *testing.T) {
 	}
 }
 
+// A 404 elsewhere in gh's output (here a request id inside a 502) is not the
+// release being missing, so the check must halt instead of running the changelog.
+func TestExecute_autoSkipReleaseCheckIgnoresUnrelated404(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: "abc1234 [maven-release-plugin] prepare for next development iteration\ndef5678 [maven-release-plugin] prepare release v2.5.0\n"}, nil)
+	fr.AddResponse(&runner.Result{Stdout: "v2.5.0\n"}, nil) // git tag --points-at
+	fr.AddResponse(&runner.Result{Stderr: "gh: Bad Gateway (HTTP 502) request 4040A1B2"}, errors.New("exit status 1"))
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	opts := defaultOpts()
+	opts.SkipUnchanged = true
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, stages, ws, fr, t.TempDir(), opts)
+	if err == nil {
+		t.Fatal("expected error when the GitHub release check fails, got nil")
+	}
+	if !strings.Contains(buf.String(), "checking GitHub release for v2.5.0") {
+		t.Errorf("expected the release check to be the failure:\n%s", buf.String())
+	}
+	if fr.CallCount() != 3 {
+		t.Errorf("expected 3 runner calls and no changelog run, got %d", fr.CallCount())
+	}
+}
+
 func TestExecute_firstReleaseCreatesSyntheticBaselineTag(t *testing.T) {
 	dir := t.TempDir()
 	ws := workspace.New(dir, &prepareSuccessRunner{})

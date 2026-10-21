@@ -818,7 +818,7 @@ func verifySkippedRelease(entry plan.Entry, ws *workspace.Workspace, r runner.Ru
 }
 
 // githubReleaseExists reports whether repo has a GitHub release for tag. It
-// queries the release-by-tag endpoint via gh; a 404 means the release is
+// queries the release-by-tag endpoint via gh; an HTTP 404 means the release is
 // missing, and any other failure (auth, network) is a real error the caller
 // should halt on rather than guessing.
 func githubReleaseExists(r runner.Runner, repo, tag string) (bool, error) {
@@ -829,7 +829,10 @@ func githubReleaseExists(r runner.Runner, repo, tag string) (bool, error) {
 	if err == nil {
 		return true, nil
 	}
-	if result != nil && strings.Contains(result.Stderr, "404") {
+	// gh reports a missing release as "gh: Not Found (HTTP 404)"; matching the
+	// status in that form keeps a 404 that merely appears elsewhere in an
+	// unrelated error (a request id, a repo name) from reading as "missing".
+	if result != nil && strings.Contains(result.Stderr, "(HTTP 404)") {
 		return false, nil
 	}
 	return false, fmt.Errorf("checking GitHub release for %s: %w", tag, err)
