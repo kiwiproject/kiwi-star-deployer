@@ -83,6 +83,13 @@ type Options struct {
 	// MavenTimeout is the per-library timeout for the mvn release:prepare release:perform
 	// command. Zero means no timeout (not recommended for production use).
 	MavenTimeout time.Duration
+	// ChangelogAttempts is how many times the changelog script is run before
+	// giving up, retrying only while the library's GitHub release does not
+	// exist yet (see runChangelog). Zero means defaultChangelogAttempts (3).
+	ChangelogAttempts int
+	// ChangelogBackoff is the delay before the first changelog retry, doubling
+	// on each subsequent one. Zero or less means defaultChangelogBackoff (10s).
+	ChangelogBackoff time.Duration
 	// ChangelogSummaries maps library name to inline summary text (--summary flag).
 	ChangelogSummaries map[string]string
 	// ChangelogSummaryFiles maps library name to summary file path (--summary-file flag).
@@ -671,18 +678,63 @@ func ensurePreviousReleaseTag(r runner.Runner, repoDir, ref string) (string, err
 	return strings.TrimPrefix(syntheticBaselineTag, "v"), nil
 }
 
-// runChangelog invokes the changelog script for one released version.
+const (
+	defaultChangelogAttempts = 3
+	defaultChangelogBackoff  = 10 * time.Second
+)
+
+// runChangelog invokes the changelog script for one released version,
+// retrying a failed run a couple of times because it makes several GitHub API
+// calls, any of which can fail transiently (a GitHub 5xx has killed it before).
+//
+// A rerun is only safe while the GitHub release does not exist: the script
+// reads the commits first, then creates the GitHub release, then closes the
+// milestone and creates the next one, so a failure after the release is created
+// would just fail again on creating it. Between attempts the release is looked
+// up, and the run is not retried if it exists or if that lookup itself fails.
 func runChangelog(r runner.Runner, entry plan.Entry, repoDir, previousRev, releaseVersion, nextMilestone string, out io.Writer, opts Options) error {
-	if _, err := r.Run(runner.Options{
-		Command:    opts.ChangelogScript,
-		Args:       changelogArgs(entry, previousRev, releaseVersion, nextMilestone, opts),
-		WorkingDir: repoDir,
-		Stdout:     out,
-		Stderr:     out,
-	}); err != nil {
+	attempts := opts.ChangelogAttempts
+	if attempts <= 0 {
+		attempts = defaultChangelogAttempts
+	}
+	backoff := opts.ChangelogBackoff
+	if backoff <= 0 {
+		backoff = defaultChangelogBackoff
+	}
+
+	var err error
+	for attempt := 1; ; attempt++ {
+		_, err = r.Run(runner.Options{
+			Command:    opts.ChangelogScript,
+			Args:       changelogArgs(entry, previousRev, releaseVersion, nextMilestone, opts),
+			WorkingDir: repoDir,
+			Stdout:     out,
+			Stderr:     out,
+		})
+		if err == nil {
+			return nil
+		}
+		if attempt >= attempts {
+			break
+		}
+
+		tag := "v" + releaseVersion
+		exists, checkErr := githubReleaseExists(r, entry.Repo, tag)
+		if checkErr != nil {
+			return fmt.Errorf("changelog: %w (not retrying: could not check whether the GitHub release exists: %v)", err, checkErr)
+		}
+		if exists {
+			return fmt.Errorf("changelog: %w (not retrying: GitHub release %s already exists, so the script failed after creating it; check whether the milestone was closed and the next milestone created, and finish those by hand)", err, tag)
+		}
+
+		fmt.Fprintf(out, "changelog failed (%v); retrying in %v (attempt %d of %d)\n", err, backoff, attempt+1, attempts)
+		time.Sleep(backoff)
+		backoff *= 2
+	}
+	if attempts == 1 {
 		return fmt.Errorf("changelog: %w", err)
 	}
-	return nil
+	return fmt.Errorf("changelog: %w (after %d attempts)", err, attempts)
 }
 
 // changelogArgs builds the argument list for one changelog script invocation.

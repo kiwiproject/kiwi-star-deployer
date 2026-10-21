@@ -90,11 +90,12 @@ func (f *fakeIssueCreator) Create(repo, title, body, label, milestone string) (i
 
 func defaultOpts() release.Options {
 	return release.Options{
-		GroupID:         "org.kiwiproject",
-		MaxWait:         time.Minute,
-		PollInterval:    time.Second,
-		Checker:         &fakeCentral{},
-		ChangelogScript: ".generate-kiwi-changelog",
+		GroupID:          "org.kiwiproject",
+		MaxWait:          time.Minute,
+		PollInterval:     time.Second,
+		Checker:          &fakeCentral{},
+		ChangelogScript:  ".generate-kiwi-changelog",
+		ChangelogBackoff: time.Millisecond,
 	}
 }
 
@@ -427,6 +428,7 @@ func TestExecute_changelogFailureHalts(t *testing.T) {
 	fr.AddResponse(&runner.Result{Stdout: "v2.5.0"}, nil) // git describe
 	fr.AddResponse(&runner.Result{}, nil)                 // mvn succeeds
 	fr.AddResponse(nil, errors.New("exit status 1"))      // changelog fails
+	fr.AddResponse(&runner.Result{}, nil)                 // gh api release-by-tag: release exists, so no retry
 
 	stages := makeStages(
 		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
@@ -440,6 +442,134 @@ func TestExecute_changelogFailureHalts(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "FAILED") {
 		t.Errorf("expected FAILED in output:\n%s", out)
+	}
+}
+
+// changelogRetryRunner queues git describe and mvn, which precede the changelog step.
+func changelogRetryRunner() *runner.FakeRunner {
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: "v2.5.0"}, nil) // git describe
+	fr.AddResponse(&runner.Result{}, nil)                 // mvn
+	return fr
+}
+
+func changelogRetryStages() [][]plan.Entry {
+	return makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+}
+
+func TestExecute_changelogRetriedWhenGitHubReleaseMissing(t *testing.T) {
+	ws := workspace.New(t.TempDir(), &prepareSuccessRunner{})
+
+	fr := changelogRetryRunner()
+	fr.AddResponse(nil, errors.New("exit status 1"))                                         // changelog: GitHub 500
+	fr.AddResponse(&runner.Result{Stderr: "gh: Not Found (HTTP 404)"}, errors.New("exit 1")) // gh api: no release yet
+	fr.AddResponse(&runner.Result{}, nil)                                                    // changelog succeeds
+
+	var buf bytes.Buffer
+	logDir := t.TempDir()
+	if err := release.Execute(&buf, changelogRetryStages(), ws, fr, logDir, defaultOpts()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fr.CallCount() != 5 {
+		t.Fatalf("expected 5 runner calls (git describe, mvn, changelog, gh api, changelog), got %d", fr.CallCount())
+	}
+	if got := fr.Calls[3]; got.Command != "gh" || !strings.Contains(strings.Join(got.Args, " "), "releases/tags/v2.5.1") {
+		t.Errorf("expected release-by-tag lookup for v2.5.1, got %s %v", got.Command, got.Args)
+	}
+	if fr.Calls[4].Command != ".generate-kiwi-changelog" {
+		t.Errorf("expected the changelog to be rerun, got %s", fr.Calls[4].Command)
+	}
+	logs, _ := filepath.Glob(filepath.Join(logDir, "*", "kiwi.log"))
+	if len(logs) != 1 {
+		t.Fatalf("expected one kiwi.log under %s, got %v", logDir, logs)
+	}
+	logText, err := os.ReadFile(logs[0])
+	if err != nil {
+		t.Fatalf("reading log: %v", err)
+	}
+	if !strings.Contains(string(logText), "retrying") {
+		t.Errorf("expected retry message in the library log:\n%s", logText)
+	}
+}
+
+func TestExecute_changelogNotRetriedWhenGitHubReleaseExists(t *testing.T) {
+	ws := workspace.New(t.TempDir(), &prepareSuccessRunner{})
+
+	fr := changelogRetryRunner()
+	fr.AddResponse(nil, errors.New("exit status 1")) // changelog fails after creating the release
+	fr.AddResponse(&runner.Result{}, nil)            // gh api: release exists
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, changelogRetryStages(), ws, fr, t.TempDir(), defaultOpts())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if fr.CallCount() != 4 {
+		t.Errorf("expected 4 runner calls and no rerun, got %d", fr.CallCount())
+	}
+	if !strings.Contains(buf.String(), "GitHub release v2.5.1 already exists") {
+		t.Errorf("expected the error to say the release exists:\n%s", buf.String())
+	}
+}
+
+func TestExecute_changelogNotRetriedWhenReleaseCheckFails(t *testing.T) {
+	ws := workspace.New(t.TempDir(), &prepareSuccessRunner{})
+
+	fr := changelogRetryRunner()
+	fr.AddResponse(nil, errors.New("exit status 1"))                                           // changelog fails
+	fr.AddResponse(&runner.Result{Stderr: "gh: Bad Gateway (HTTP 502)"}, errors.New("exit 1")) // gh api: cannot tell
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, changelogRetryStages(), ws, fr, t.TempDir(), defaultOpts())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if fr.CallCount() != 4 {
+		t.Errorf("expected 4 runner calls and no rerun, got %d", fr.CallCount())
+	}
+}
+
+func TestExecute_changelogSingleAttemptDoesNotRetry(t *testing.T) {
+	ws := workspace.New(t.TempDir(), &prepareSuccessRunner{})
+
+	fr := changelogRetryRunner()
+	fr.AddResponse(nil, errors.New("exit status 1")) // the only attempt
+
+	opts := defaultOpts()
+	opts.ChangelogAttempts = 1
+
+	var buf bytes.Buffer
+	if err := release.Execute(&buf, changelogRetryStages(), ws, fr, t.TempDir(), opts); err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if fr.CallCount() != 3 {
+		t.Errorf("expected 3 runner calls and no release lookup, got %d", fr.CallCount())
+	}
+}
+
+func TestExecute_changelogGivesUpAfterAttempts(t *testing.T) {
+	ws := workspace.New(t.TempDir(), &prepareSuccessRunner{})
+
+	notFound := &runner.Result{Stderr: "gh: Not Found (HTTP 404)"}
+	fr := changelogRetryRunner()
+	fr.AddResponse(nil, errors.New("exit status 1")) // attempt 1
+	fr.AddResponse(notFound, errors.New("exit 1"))
+	fr.AddResponse(nil, errors.New("exit status 1")) // attempt 2
+	fr.AddResponse(notFound, errors.New("exit 1"))
+	fr.AddResponse(nil, errors.New("exit status 1")) // attempt 3: no release check after the last
+
+	var buf bytes.Buffer
+	err := release.Execute(&buf, changelogRetryStages(), ws, fr, t.TempDir(), defaultOpts())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if fr.CallCount() != 7 {
+		t.Errorf("expected 7 runner calls, got %d", fr.CallCount())
+	}
+	if !strings.Contains(buf.String(), "after 3 attempts") {
+		t.Errorf("expected the attempt count in the error:\n%s", buf.String())
 	}
 }
 
@@ -1682,6 +1812,7 @@ func TestExecute_autoSkipChangelogFailureHalts(t *testing.T) {
 	fr.AddResponse(&runner.Result{Stderr: "gh: Not Found (HTTP 404)"}, errors.New("exit status 1"))
 	fr.AddResponse(&runner.Result{Stdout: "v2.4.0\n"}, nil) // git describe v2.5.0^
 	fr.AddResponse(nil, errors.New("milestone API error"))  // changelog fails
+	fr.AddResponse(&runner.Result{}, nil)                   // gh api release-by-tag: release exists, so no retry
 
 	stages := makeStages(
 		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},

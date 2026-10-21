@@ -200,6 +200,13 @@ Duration values use Go duration syntax: `30s`, `5m`, `1h30m`.
 after each library release. The script automatically picks up user preferences
 from `~/.kiwi-changelog.yml`.
 
+If the script fails (for example on a transient GitHub error), it is run
+again, up to three attempts in all with a growing delay between them, but
+only while the library's GitHub release does not exist yet. The script
+creates the release before it closes the milestone, so a failure after that
+point is not retried; the error says so, and the milestone steps need a
+manual check.
+
 At minimum, set these two keys:
 
 ```yaml
