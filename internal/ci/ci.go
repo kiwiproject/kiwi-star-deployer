@@ -2,6 +2,7 @@ package ci
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -16,7 +17,15 @@ import (
 // polls gh run view until all discovered runs complete successfully.
 type GHChecker struct {
 	Runner runner.Runner
+	// MaxPollErrors is how many gh poll calls in a row may fail before Wait
+	// gives up. Zero or less means defaultMaxPollErrors (3).
+	MaxPollErrors int
 }
+
+// defaultMaxPollErrors tolerates the occasional transient gh failure (a
+// GitHub 5xx or a network blip) without failing a wait that may already have
+// run for many minutes.
+const defaultMaxPollErrors = 3
 
 type ghRun struct {
 	DatabaseID int64  `json:"databaseId"`
@@ -29,6 +38,10 @@ type ghRun struct {
 //
 // listRuns is called on every poll cycle so that runs which appear shortly after
 // the push (due to GitHub queuing delay) are not missed.
+//
+// A failed gh call does not end the wait by itself: it is reported and the next
+// cycle tries again, and only MaxPollErrors failed cycles in a row return the
+// error. Polling only reads, so repeating it is always safe.
 func (c *GHChecker) Wait(w io.Writer, repo, commitSHA string, maxWait, interval time.Duration) error {
 	deadline := time.Now().Add(maxWait)
 	shortSHA := commitSHA
@@ -46,17 +59,58 @@ func (c *GHChecker) Wait(w io.Writer, repo, commitSHA string, maxWait, interval 
 	// the first time a poll finds no runs.
 	checkedWorkflows := false
 
+	maxPollErrors := c.MaxPollErrors
+	if maxPollErrors <= 0 {
+		maxPollErrors = defaultMaxPollErrors
+	}
+	pollErrors := 0
+	cycleFailed := false
+	var lastPollErr error
+	// pollFailed records a failed gh call; several failures in one cycle count
+	// once. It returns err once maxPollErrors cycles in a row have failed, and
+	// nil when the wait should carry on.
+	pollFailed := func(err error) error {
+		lastPollErr = err
+		if !cycleFailed {
+			cycleFailed = true
+			pollErrors++
+		}
+		if pollErrors >= maxPollErrors {
+			if pollErrors > 1 {
+				return fmt.Errorf("%w (giving up after %d failed polls in a row)", err, pollErrors)
+			}
+			return err
+		}
+		fmt.Fprintf(w, "    CI: poll failed (%v); will retry (failure %d of %d allowed in a row)\n", err, pollErrors, maxPollErrors)
+		return nil
+	}
+	timedOut := func(msg string) error {
+		if lastPollErr != nil {
+			return fmt.Errorf("%s (last poll error: %v)", msg, lastPollErr)
+		}
+		return errors.New(msg)
+	}
+
 	for {
+		if !cycleFailed {
+			pollErrors = 0
+		}
+		cycleFailed = false
+
 		if time.Now().After(deadline) {
 			if len(known) == 0 {
-				return fmt.Errorf("timed out waiting for CI run to appear for %s@%s", repo, shortSHA)
+				return timedOut(fmt.Sprintf("timed out waiting for CI run to appear for %s@%s", repo, shortSHA))
 			}
-			return fmt.Errorf("timed out waiting for CI to complete for %s", repo)
+			return timedOut(fmt.Sprintf("timed out waiting for CI to complete for %s", repo))
 		}
 
 		ids, err := c.listRuns(repo, commitSHA)
 		if err != nil {
-			return err
+			if err := pollFailed(err); err != nil {
+				return err
+			}
+			time.Sleep(interval)
+			continue
 		}
 		for _, id := range ids {
 			if _, exists := known[id]; !exists {
@@ -85,7 +139,10 @@ func (c *GHChecker) Wait(w io.Writer, repo, commitSHA string, maxWait, interval 
 		for id := range pending {
 			run, err := c.viewRun(repo, id)
 			if err != nil {
-				return err
+				if err := pollFailed(err); err != nil {
+					return err
+				}
+				continue
 			}
 			if run.Status != "completed" {
 				fmt.Fprintf(w, "    CI: run %d status: %s\n", id, run.Status)
