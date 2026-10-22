@@ -6,12 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
-	"sync"
 	"text/tabwriter"
 
 	"github.com/kiwiproject/kiwi-star-deployer/internal/config"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/parallel"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/pom"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/runner"
 )
@@ -33,26 +32,9 @@ type Result struct {
 // RunAll checks every library in libs concurrently (bounded by
 // maxConcurrentChecks) and returns results sorted by library name.
 func RunAll(r runner.Runner, libs map[string]config.Library) []Result {
-	names := make([]string, 0, len(libs))
-	for name := range libs {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	results := make([]Result, len(names))
-	sem := make(chan struct{}, maxConcurrentChecks)
-	var wg sync.WaitGroup
-	for i, name := range names {
-		wg.Add(1)
-		go func(idx int, name string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			results[idx] = check(r, name, libs[name].Repo)
-		}(i, name)
-	}
-	wg.Wait()
-	return results
+	return parallel.ForEachLibrary(libs, maxConcurrentChecks, func(name string, lib config.Library) Result {
+		return check(r, name, lib.Repo)
+	})
 }
 
 // AllPassed returns true if every result passed.
