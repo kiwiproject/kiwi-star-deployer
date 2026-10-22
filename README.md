@@ -1,5 +1,8 @@
 # kiwi-star-deployer
 
+[![CI](https://github.com/kiwiproject/kiwi-star-deployer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/kiwiproject/kiwi-star-deployer/actions/workflows/ci.yml?query=branch%3Amain)
+[![CodeQL](https://github.com/kiwiproject/kiwi-star-deployer/actions/workflows/codeql.yml/badge.svg)](https://github.com/kiwiproject/kiwi-star-deployer/actions/workflows/codeql.yml)
+
 A CLI tool that automates releasing kiwiproject Java and Kotlin libraries in
 the correct dependency order, handling version propagation, parallel stages,
 Maven Central verification, changelog generation, and failure recovery.
