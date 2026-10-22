@@ -204,6 +204,30 @@ func latestTag(r runner.Runner, repo string) (tag string, found bool, err error)
 	return payload.TagName, true, nil
 }
 
+// compareResponse is the part of the compare endpoint's response that is used.
+type compareResponse struct {
+	AheadBy int             `json:"ahead_by"`
+	Commits []compareCommit `json:"commits"`
+}
+
+type compareCommit struct {
+	Author *compareUser   `json:"author"` // null when the commit's email matches no GitHub user
+	Commit compareDetails `json:"commit"`
+}
+
+type compareUser struct {
+	Login string `json:"login"`
+}
+
+type compareDetails struct {
+	Message string        `json:"message"`
+	Author  compareAuthor `json:"author"`
+}
+
+type compareAuthor struct {
+	Name string `json:"name"`
+}
+
 // fetchCommits returns how many commits main is ahead of tag, and the first
 // page of those commits, classified.
 func fetchCommits(r runner.Runner, repo, tag string) (aheadBy int, commits []Commit, err error) {
@@ -217,20 +241,7 @@ func fetchCommits(r runner.Runner, repo, tag string) (aheadBy int, commits []Com
 		return 0, nil, withStderr(err, res)
 	}
 
-	var payload struct {
-		AheadBy int `json:"ahead_by"`
-		Commits []struct {
-			Author *struct {
-				Login string `json:"login"`
-			} `json:"author"`
-			Commit struct {
-				Message string `json:"message"`
-				Author  struct {
-					Name string `json:"name"`
-				} `json:"author"`
-			} `json:"commit"`
-		} `json:"commits"`
-	}
+	var payload compareResponse
 	if err := json.Unmarshal([]byte(res.Stdout), &payload); err != nil {
 		return 0, nil, fmt.Errorf("parsing response: %w", err)
 	}
