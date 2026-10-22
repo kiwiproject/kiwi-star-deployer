@@ -12,6 +12,7 @@ import (
 
 	"github.com/kiwiproject/kiwi-star-deployer/internal/config"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/plan"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/pom"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/runner"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/state"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/version"
@@ -370,6 +371,11 @@ func updatePOM(entry plan.Entry, deps []plan.Entry, ws *workspace.Workspace, r r
 		}
 	}
 
+	var previousVersions map[string]string
+	if opts.IssueCreator != nil {
+		previousVersions = readPreviousVersions(out, repoDir, deps)
+	}
+
 	for _, dep := range deps {
 		if _, err := r.Run(runner.Options{
 			Command:    "mvn",
@@ -406,7 +412,7 @@ func updatePOM(entry plan.Entry, deps []plan.Entry, ws *workspace.Workspace, r r
 
 	var issueNumbers map[string]int
 	if opts.IssueCreator != nil {
-		issueNumbers, err = createDependencyBumpIssues(out, entry, deps, existingIssues, opts)
+		issueNumbers, err = createDependencyBumpIssues(out, entry, deps, existingIssues, previousVersions, opts)
 		if err != nil {
 			return fmt.Errorf("creating dependency bump issues: %w", err)
 		}
@@ -483,11 +489,11 @@ func mavenVersionArgs(dep plan.Entry) []string {
 // ListOpenByMilestone before touching the working copy; an issue already open
 // with a matching title — left over from an earlier attempt that created it
 // but failed before committing — is reused instead of duplicated.
-func createDependencyBumpIssues(w io.Writer, entry plan.Entry, deps []plan.Entry, existing map[string]int, opts Options) (map[string]int, error) {
+func createDependencyBumpIssues(w io.Writer, entry plan.Entry, deps []plan.Entry, existing map[string]int, previousVersions map[string]string, opts Options) (map[string]int, error) {
 	milestone := entry.VersionPlan.ReleaseVersion
 	issueNumbers := make(map[string]int, len(deps))
 	for _, dep := range deps {
-		title := fmt.Sprintf("Update %s to %s", dep.Name, dep.VersionPlan.ReleaseVersion)
+		title := dependencyBumpTitle(opts.GroupID, dep, previousVersions[dep.Name])
 		if n, ok := existing[title]; ok {
 			fmt.Fprintf(w, "  issue already exists for %q (#%d); reusing\n", title, n)
 			issueNumbers[dep.Name] = n
@@ -502,6 +508,60 @@ func createDependencyBumpIssues(w io.Writer, entry plan.Entry, deps []plan.Entry
 		issueNumbers[dep.Name] = n
 	}
 	return issueNumbers, nil
+}
+
+// dependencyBumpTitle builds the title of a dependency-bump issue in the form
+// Dependabot uses for a Maven bump, so the issue sits naturally beside
+// Dependabot's own entries in the changelog:
+//
+//	chore(deps): bump org.kiwiproject:kiwi-parent from 3.0.42 to 3.0.43
+//
+// previous is the version the downstream POM declared before the bump; when it
+// is unknown, or is already the new version, the "from" part is left out.
+func dependencyBumpTitle(groupID string, dep plan.Entry, previous string) string {
+	artifact := groupID + ":" + dep.Name
+	if previous == "" || previous == dep.VersionPlan.ReleaseVersion {
+		return fmt.Sprintf("chore(deps): bump %s to %s", artifact, dep.VersionPlan.ReleaseVersion)
+	}
+	return fmt.Sprintf("chore(deps): bump %s from %s to %s", artifact, previous, dep.VersionPlan.ReleaseVersion)
+}
+
+// readPreviousVersions returns, per dependency name, the version the
+// downstream repo's root pom.xml declares before the bump: the <parent>
+// version for a parent-pom dependency, the <name>.version property for all
+// others. It reads the working copy from disk, which updatePOM has just reset
+// to origin/main. A POM or dependency it cannot read is noted in w and left
+// out of the result, since that only costs the issue title its "from" part and
+// must not fail the release.
+func readPreviousVersions(w io.Writer, repoDir string, deps []plan.Entry) map[string]string {
+	previous := make(map[string]string, len(deps))
+	data, err := os.ReadFile(filepath.Join(repoDir, "pom.xml"))
+	if err != nil {
+		fmt.Fprintf(w, "  could not read pom.xml to find previous dependency versions for the issue titles: %v\n", err)
+		return previous
+	}
+	props, propsErr := pom.ParseProperties(bytes.NewReader(data))
+	parentVersion, parentErr := pom.ParseParentVersion(bytes.NewReader(data))
+	for _, dep := range deps {
+		var v string
+		var parseErr error
+		if dep.Type == config.TypeParentPOM {
+			v, parseErr = parentVersion, parentErr
+		} else {
+			v, parseErr = props[dep.Name+".version"], propsErr
+		}
+		v = strings.TrimSpace(v)
+		if parseErr != nil || v == "" || strings.HasPrefix(v, "${") {
+			reason := "not declared as a literal version"
+			if parseErr != nil {
+				reason = parseErr.Error()
+			}
+			fmt.Fprintf(w, "  previous version of %s not found in pom.xml (%s); its issue title will not say what it was bumped from\n", dep.Name, reason)
+			continue
+		}
+		previous[dep.Name] = v
+	}
+	return previous
 }
 
 func buildPOMUpdateCommitMessage(deps []plan.Entry, issueNumbers map[string]int) string {

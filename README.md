@@ -552,7 +552,10 @@ without batching it would otherwise go through a separate commit and CI
 wait after almost every stage in the run.
 
 For each dependency in that commit, a GitHub issue is also created on the
-library's own repo (e.g. "Update kiwi to 5.4.0"), labeled with
+library's own repo, titled like Dependabot titles a Maven bump (e.g.
+"chore(deps): bump org.kiwiproject:kiwi from 5.3.0 to 5.4.0", where the
+previous version is read from the library's pom.xml before the bump, and
+left out of the title if it can't be found), labeled with
 `dependency_bump_issue_label` and tagged with the library's own upcoming
 milestone, then referenced with a `Closes #NNN` line in the same commit.
 GitHub auto-closes the issue on push, and because kiwiproject-changelog
