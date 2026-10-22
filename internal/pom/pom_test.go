@@ -78,6 +78,39 @@ func TestParseVersion_invalidXMLIsError(t *testing.T) {
 	}
 }
 
+func TestParseParentVersion_returnsParentVersion(t *testing.T) {
+	v, err := pom.ParseParentVersion(strings.NewReader(`<project>
+  <parent>
+    <groupId>org.kiwiproject</groupId>
+    <artifactId>kiwi-parent</artifactId>
+    <version>3.0.42</version>
+  </parent>
+  <version>2.5.1-SNAPSHOT</version>
+</project>`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v != "3.0.42" {
+		t.Errorf("got %q, want 3.0.42", v)
+	}
+}
+
+func TestParseParentVersion_noParentReturnsEmpty(t *testing.T) {
+	v, err := pom.ParseParentVersion(strings.NewReader(`<project><version>2.5.1-SNAPSHOT</version></project>`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v != "" {
+		t.Errorf("got %q, want empty", v)
+	}
+}
+
+func TestParseParentVersion_invalidXMLIsError(t *testing.T) {
+	if _, err := pom.ParseParentVersion(strings.NewReader("<project><parent>")); err == nil {
+		t.Error("expected error for malformed XML, got nil")
+	}
+}
+
 func TestParseProperties_returnsProperties(t *testing.T) {
 	props, err := pom.ParseProperties(open(t, "testdata/with-properties.xml"))
 	if err != nil {

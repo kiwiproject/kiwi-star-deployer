@@ -104,6 +104,21 @@ func ParseDependencies(r io.Reader) ([]Dependency, error) {
 	return deps, nil
 }
 
+// ParseParentVersion returns the version declared in the POM's <parent>
+// element, or an empty string if the POM has no <parent> or the parent
+// declares no version.
+func ParseParentVersion(r io.Reader) (string, error) {
+	var doc struct {
+		Parent struct {
+			Version string `xml:"version"`
+		} `xml:"parent"`
+	}
+	if err := xml.NewDecoder(r).Decode(&doc); err != nil {
+		return "", fmt.Errorf("parsing XML: %w", err)
+	}
+	return strings.TrimSpace(doc.Parent.Version), nil
+}
+
 // ParseVersion reads the project version from any XML source. It returns an
 // error if the XML is malformed, no <version> element exists as a direct child
 // of <project>, or the version is not a SNAPSHOT.

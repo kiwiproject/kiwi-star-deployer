@@ -1263,7 +1263,7 @@ func TestExecute_createsDependencyBumpIssues(t *testing.T) {
 		t.Fatalf("expected 1 issue created, got %d: %+v", len(ic.created), ic.created)
 	}
 	got := ic.created[0]
-	if got.repo != "kiwiproject/kiwi" || got.title != "Update kiwi-parent to 3.0.0" ||
+	if got.repo != "kiwiproject/kiwi" || got.title != "chore(deps): bump org.kiwiproject:kiwi-parent to 3.0.0" ||
 		got.label != "dependencies" || got.milestone != "2.5.1" {
 		t.Errorf("unexpected created issue: %+v", got)
 	}
@@ -1275,6 +1275,184 @@ func TestExecute_createsDependencyBumpIssues(t *testing.T) {
 	msg := commitCall.Args[2]
 	if !strings.Contains(msg, "Closes #1\n") {
 		t.Errorf("expected 'Closes #1' in commit message:\n%s", msg)
+	}
+}
+
+// writeDownstreamPOM puts a pom.xml where ws.RepoDir(name) will find it.
+func writeDownstreamPOM(t *testing.T, wsDir, name, content string) {
+	t.Helper()
+	repoDir := filepath.Join(wsDir, name)
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "pom.xml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExecute_dependencyBumpIssueTitleHasPreviousParentVersion(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+	writeDownstreamPOM(t, dir, "kiwi", `<project>
+  <parent><groupId>org.kiwiproject</groupId><artifactId>kiwi-parent</artifactId><version>2.9.5</version></parent>
+  <version>2.5.1-SNAPSHOT</version>
+</project>`)
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.9.0")
+	addPOMUpdateResponses(fr)
+	addLibraryResponses(fr, "v2.5.0")
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Type: "parent-pom", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	ic := &fakeIssueCreator{}
+	opts := defaultOpts()
+	opts.IssueCreator = ic
+	opts.DependencyBumpIssueLabel = "dependencies"
+
+	if err := release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ic.created) != 1 {
+		t.Fatalf("expected 1 issue created, got %+v", ic.created)
+	}
+	want := "chore(deps): bump org.kiwiproject:kiwi-parent from 2.9.5 to 3.0.0"
+	if ic.created[0].title != want {
+		t.Errorf("title = %q, want %q", ic.created[0].title, want)
+	}
+}
+
+func TestExecute_dependencyBumpIssueTitleHasPreviousPropertyVersion(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+	writeDownstreamPOM(t, dir, "kiwi", `<project>
+  <parent><groupId>org.kiwiproject</groupId><artifactId>kiwi-parent</artifactId><version>3.0.0</version></parent>
+  <version>2.5.1-SNAPSHOT</version>
+  <properties><kiwi-bom.version>3.3.4</kiwi-bom.version></properties>
+</project>`)
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v3.3.4")
+	addPOMUpdateResponses(fr)
+	addLibraryResponses(fr, "v2.5.0")
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-bom", Repo: "kiwiproject/kiwi-bom", Type: "bom", Stage: 1, VersionPlan: mustPlan("kiwi-bom", "3.3.5-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-bom"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	ic := &fakeIssueCreator{}
+	opts := defaultOpts()
+	opts.IssueCreator = ic
+	opts.DependencyBumpIssueLabel = "dependencies"
+
+	if err := release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ic.created) != 1 {
+		t.Fatalf("expected 1 issue created, got %+v", ic.created)
+	}
+	want := "chore(deps): bump org.kiwiproject:kiwi-bom from 3.3.4 to 3.3.5"
+	if ic.created[0].title != want {
+		t.Errorf("title = %q, want %q", ic.created[0].title, want)
+	}
+}
+
+// A POM whose property is missing must not fail the release over an issue
+// title: the title just drops the "from" part and the log says why.
+func TestExecute_dependencyBumpIssueTitleWithoutPreviousVersion(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+	writeDownstreamPOM(t, dir, "kiwi", `<project><version>2.5.1-SNAPSHOT</version><properties/></project>`)
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v3.3.4")
+	addPOMUpdateResponses(fr)
+	addLibraryResponses(fr, "v2.5.0")
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-bom", Repo: "kiwiproject/kiwi-bom", Type: "bom", Stage: 1, VersionPlan: mustPlan("kiwi-bom", "3.3.5-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-bom"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	ic := &fakeIssueCreator{}
+	opts := defaultOpts()
+	opts.IssueCreator = ic
+	opts.DependencyBumpIssueLabel = "dependencies"
+
+	logBaseDir := t.TempDir()
+	if err := release.Execute(&bytes.Buffer{}, stages, ws, fr, logBaseDir, opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "chore(deps): bump org.kiwiproject:kiwi-bom to 3.3.5"
+	if len(ic.created) != 1 || ic.created[0].title != want {
+		t.Fatalf("expected one issue titled %q, got %+v", want, ic.created)
+	}
+	logs, _ := filepath.Glob(filepath.Join(logBaseDir, "*", "kiwi-pom-update.log"))
+	if len(logs) != 1 {
+		t.Fatalf("expected one kiwi-pom-update.log, got %v", logs)
+	}
+	logData, err := os.ReadFile(logs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(logData), "previous version of kiwi-bom") {
+		t.Errorf("expected a note about the unknown previous version in the log:\n%s", logData)
+	}
+}
+
+// bumpIssueTitleForBOMProperty releases kiwi-bom 3.3.5 and returns the title of
+// the issue created for the downstream kiwi POM, whose kiwi-bom.version
+// property holds propertyValue verbatim.
+func bumpIssueTitleForBOMProperty(t *testing.T, propertyValue string) string {
+	t.Helper()
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+	writeDownstreamPOM(t, dir, "kiwi", "<project><version>2.5.1-SNAPSHOT</version><properties><kiwi-bom.version>"+propertyValue+"</kiwi-bom.version></properties></project>")
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v3.3.4")
+	addPOMUpdateResponses(fr)
+	addLibraryResponses(fr, "v2.5.0")
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-bom", Repo: "kiwiproject/kiwi-bom", Type: "bom", Stage: 1, VersionPlan: mustPlan("kiwi-bom", "3.3.5-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-bom"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+	ic := &fakeIssueCreator{}
+	opts := defaultOpts()
+	opts.IssueCreator = ic
+	opts.DependencyBumpIssueLabel = "dependencies"
+
+	if err := release.Execute(&bytes.Buffer{}, stages, ws, fr, t.TempDir(), opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ic.created) != 1 {
+		t.Fatalf("expected 1 issue created, got %+v", ic.created)
+	}
+	return ic.created[0].title
+}
+
+func TestExecute_dependencyBumpIssueTitlePreviousVersionEdgeCases(t *testing.T) {
+	const noFrom = "chore(deps): bump org.kiwiproject:kiwi-bom to 3.3.5"
+	tests := []struct {
+		name          string
+		propertyValue string
+		want          string
+	}{
+		{"whitespace around the value is trimmed", "\n    3.3.4\n  ", "chore(deps): bump org.kiwiproject:kiwi-bom from 3.3.4 to 3.3.5"},
+		{"a property placeholder is not a version", "${other.version}", noFrom},
+		{"an already-current version has no from", "3.3.5", noFrom},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := bumpIssueTitleForBOMProperty(t, tt.propertyValue); got != tt.want {
+				t.Errorf("title = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -1292,7 +1470,7 @@ func TestExecute_dependencyBumpIssueDedupReusesExisting(t *testing.T) {
 		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
 	)
 
-	ic := &fakeIssueCreator{existing: map[string]int{"Update kiwi-parent to 3.0.0": 501}}
+	ic := &fakeIssueCreator{existing: map[string]int{"chore(deps): bump org.kiwiproject:kiwi-parent to 3.0.0": 501}}
 	opts := defaultOpts()
 	opts.IssueCreator = ic
 	opts.DependencyBumpIssueLabel = "dependencies"
