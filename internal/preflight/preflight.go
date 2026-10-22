@@ -85,27 +85,30 @@ func checkGPGSigning(r runner.Runner) Result {
 	return Result{Name: "gpg signing", OK: true}
 }
 
+// ghVersionCheck is the name of the check that gh can run.
+const ghVersionCheck = "gh version"
+
 func checkGHVersion(r runner.Runner) Result {
 	result, err := r.Run(runner.Options{
 		Command: "gh",
 		Args:    []string{"--version"},
 	})
 	if err != nil {
-		return Result{Name: "gh version", OK: false, Message: "could not run gh --version"}
+		return Result{Name: ghVersionCheck, OK: false, Message: "could not run gh --version"}
 	}
 	v, err := parseGHVersion(result.Stdout)
 	if err != nil {
-		return Result{Name: "gh version", OK: false, Message: err.Error()}
+		return Result{Name: ghVersionCheck, OK: false, Message: err.Error()}
 	}
 	if lessThan(v, minGHVersion) {
 		return Result{
-			Name: "gh version",
+			Name: ghVersionCheck,
 			OK:   false,
 			Message: fmt.Sprintf("gh %d.%d.%d found, but %d.%d.%d or later is required (for gh run list --commit)",
 				v[0], v[1], v[2], minGHVersion[0], minGHVersion[1], minGHVersion[2]),
 		}
 	}
-	return Result{Name: "gh version", OK: true}
+	return Result{Name: ghVersionCheck, OK: true}
 }
 
 // parseGHVersion extracts the semantic version from gh --version output,
