@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/kiwiproject/kiwi-star-deployer/internal/changes"
@@ -32,10 +33,16 @@ func runChanges(_ *cobra.Command, _ []string) error {
 		}
 	}
 
-	libs := selectLibraries(cfg.Libraries, changesOnly)
-	fmt.Fprintf(os.Stderr, "Checking %d %s for changes since their last release...\n", len(libs), libNoun(len(libs)))
-	results := changes.RunAll(runner.NewOsRunner(), libs)
-	changes.Print(os.Stdout, results, changesVerbose)
+	return reportChanges(os.Stdout, os.Stderr, runner.NewOsRunner(), selectLibraries(cfg.Libraries, changesOnly), changesVerbose)
+}
+
+// reportChanges looks up what changed in libs since their last releases and
+// prints the table to out, with the progress line going to progress. It
+// returns an error when any library could not be checked.
+func reportChanges(out, progress io.Writer, r runner.Runner, libs map[string]config.Library, verbose bool) error {
+	fmt.Fprintf(progress, "Checking %d %s for changes since their last release...\n", len(libs), libNoun(len(libs)))
+	results := changes.RunAll(r, libs)
+	changes.Print(out, results, verbose)
 	if changes.AnyFailed(results) {
 		return fmt.Errorf("could not check every library")
 	}

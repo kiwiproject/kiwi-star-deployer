@@ -261,3 +261,51 @@ func TestRunAll_failureMessageIncludesGhStderr(t *testing.T) {
 		t.Errorf("expected stderr on one line in the message, got %q", r.Message)
 	}
 }
+
+func TestRunAll_lookupProblems(t *testing.T) {
+	const repo = "kiwiproject/kiwi"
+	tests := []struct {
+		name      string
+		responses map[string]*runner.Result
+		errs      map[string]error
+		wantInMsg string
+	}{
+		{
+			name:      "release response is not JSON",
+			responses: map[string]*runner.Result{releaseKey(repo): {Stdout: "not json"}},
+			wantInMsg: "parsing response",
+		},
+		{
+			name:      "release response has no tag",
+			responses: map[string]*runner.Result{releaseKey(repo): {Stdout: "{}"}},
+			wantInMsg: "no tag_name",
+		},
+		{
+			name: "compare call fails",
+			responses: map[string]*runner.Result{
+				releaseKey(repo): releaseResponse(t, "v1.0.0"),
+			},
+			errs:      map[string]error{compareKey(repo, "v1.0.0"): errors.New("exit status 1")},
+			wantInMsg: "could not compare with v1.0.0: exit status 1",
+		},
+		{
+			name: "compare response is not JSON",
+			responses: map[string]*runner.Result{
+				releaseKey(repo):           releaseResponse(t, "v1.0.0"),
+				compareKey(repo, "v1.0.0"): {Stdout: "not json"},
+			},
+			wantInMsg: "could not compare with v1.0.0: parsing response",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &dispatchRunner{responses: tt.responses, errs: tt.errs}
+
+			r := changes.RunAll(d, singleLib(repo))[0]
+
+			if !strings.Contains(r.Message, tt.wantInMsg) {
+				t.Errorf("expected %q in the message, got %q", tt.wantInMsg, r.Message)
+			}
+		})
+	}
+}
