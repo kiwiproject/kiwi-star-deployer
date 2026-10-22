@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+const snapshotSuffix = "-SNAPSHOT"
+
 // Plan holds the computed version information for a single library's release.
 type Plan struct {
 	Name           string
@@ -17,11 +19,11 @@ type Plan struct {
 // Compute derives the release and next development versions for name.
 // pomVersion must end with "-SNAPSHOT".
 func Compute(name, pomVersion string) (Plan, error) {
-	if !strings.HasSuffix(pomVersion, "-SNAPSHOT") {
+	if !strings.HasSuffix(pomVersion, snapshotSuffix) {
 		return Plan{}, fmt.Errorf("%s: POM version %q is not a SNAPSHOT", name, pomVersion)
 	}
 
-	releaseVersion := strings.TrimSuffix(pomVersion, "-SNAPSHOT")
+	releaseVersion := strings.TrimSuffix(pomVersion, snapshotSuffix)
 
 	nextDev, err := nextPatchSnapshot(releaseVersion)
 	if err != nil {
@@ -51,7 +53,7 @@ func nextPatchSnapshot(v string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return next + "-SNAPSHOT", nil
+	return next + snapshotSuffix, nil
 }
 
 // parseXYZ parses an "X.Y.Z" version string into its three numeric components.

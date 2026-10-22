@@ -38,6 +38,8 @@ var (
 	purgeYes  bool
 )
 
+const noRunsFound = "No release runs found."
+
 func runLogsList(_ *cobra.Command, _ []string) error {
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -62,7 +64,7 @@ func listLogs(w io.Writer, logsDir string) error {
 	entries, err := os.ReadDir(logsDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintln(w, "No release runs found.")
+			fmt.Fprintln(w, noRunsFound)
 			return nil
 		}
 		return fmt.Errorf("reading logs directory: %w", err)
@@ -77,7 +79,7 @@ func listLogs(w io.Writer, logsDir string) error {
 	}
 
 	if len(dirs) == 0 {
-		fmt.Fprintln(w, "No release runs found.")
+		fmt.Fprintln(w, noRunsFound)
 		return nil
 	}
 
@@ -110,7 +112,7 @@ func purgeLogs(w io.Writer, r io.Reader, logsDir string, age time.Duration, yes 
 	entries, err := os.ReadDir(logsDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintln(w, "No release runs found.")
+			fmt.Fprintln(w, noRunsFound)
 			return nil
 		}
 		return fmt.Errorf("reading logs directory: %w", err)

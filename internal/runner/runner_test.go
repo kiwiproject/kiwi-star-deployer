@@ -65,7 +65,7 @@ func TestOsRunner_timeoutCancelsCommand(t *testing.T) {
 func TestFakeRunner_panicOnUnexpectedCall(t *testing.T) {
 	f := &runner.FakeRunner{}
 	defer func() {
-		if r := recover(); r == nil {
+		if recover() == nil {
 			t.Error("expected panic on unconfigured call, got none")
 		}
 	}()
