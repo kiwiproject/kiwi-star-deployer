@@ -478,6 +478,53 @@ Example output:
 
 ---
 
+### changes
+
+Shows what has changed in each library since its last GitHub release, to
+help decide which libraries are worth releasing and what to pass to
+`release --only`. It reads the GitHub API only, so nothing is cloned and the
+workspace is not touched.
+
+```sh
+kiwi-star-deployer changes
+kiwi-star-deployer changes --only kiwi,kiwi-test -v
+```
+
+| Flag | Description |
+|------|-------------|
+| `--only <libs>` | Check only the named libraries (comma-separated or repeated) |
+| `-v`, `--verbose` | List the commits behind each library's counts |
+
+Example output:
+
+```
+LIBRARY      LAST RELEASE  COMMITS  DEPS  MAINT  OTHER
+kiwi         v5.4.0        28       21    3      4
+kiwi-parent  v3.0.45       2        1     1      0
+kiwi-new     (none)        -        -     -      -
+```
+
+`COMMITS` is the number of commits on `main` since the library's latest
+GitHub release, not counting the `[maven-release-plugin]` commits (the
+"prepare for next development iteration" commit always follows the release
+tag, so without this every library would look changed). The other columns
+split that count by a guess based on each commit's author and the start of
+its message:
+
+- `DEPS`: commits by Dependabot, or whose message starts with `chore(deps`,
+  `deps:` or `bump`.
+- `MAINT`: messages starting with `ci`, `build`, `chore`, `docs`, `test`,
+  `style` or `refactor` followed by `:`, `(` or `!`.
+- `OTHER`: everything else, which includes the real changes.
+
+This is a heuristic, not a verdict: use `-v` to read the commits before
+deciding. A library with no GitHub release shows `(none)`. At most the first
+100 commits are classified, so for a library with more than that the
+total is exact and a note says how many were broken down. The command exits
+non-zero only if a library could not be checked.
+
+---
+
 ### status
 
 Displays the state of the current or most recent release run: which libraries
