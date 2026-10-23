@@ -44,6 +44,22 @@ func TestWrite_StampsEachLine(t *testing.T) {
 	}
 }
 
+func TestNew_StampsWithTheCurrentTime(t *testing.T) {
+	var out bytes.Buffer
+	w := timestamp.New(&out)
+
+	before := time.Now().Format("15:04:05")
+	fmt.Fprintln(w, "hello")
+	after := time.Now().Format("15:04:05")
+
+	// The clock may tick between reading the time and writing, so the stamp
+	// can be either of the two readings.
+	got := out.String()
+	if got != before+"  hello\n" && got != after+"  hello\n" {
+		t.Errorf("got %q, want a stamp of %s or %s", got, before, after)
+	}
+}
+
 func TestWrite_ReportsLengthOfInput(t *testing.T) {
 	var out bytes.Buffer
 	w := timestamp.NewWithClock(&out, clock(at("2026-10-22", "21:40:21")))
