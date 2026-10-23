@@ -15,6 +15,7 @@ import (
 	"github.com/kiwiproject/kiwi-star-deployer/internal/pom"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/runner"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/state"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/timestamp"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/version"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/workspace"
 )
@@ -137,9 +138,14 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 		return fmt.Errorf("creating session log: %w", err)
 	}
 	defer func() { _ = sessionLog.Close() }()
-	w = io.MultiWriter(w, sessionLog)
+	w = timestamp.New(io.MultiWriter(w, sessionLog))
+	// Log lines show only the time of day, so the date goes on the line that
+	// opens each stretch of the log: the start of a run, or a resume.
+	startedAt := time.Now().Format("2006-01-02 15:04:05 MST")
 	if opts.LogDir != "" {
-		fmt.Fprintf(w, "\n--- resumed at %s ---\n\n", time.Now().UTC().Format(time.RFC3339))
+		fmt.Fprintf(w, "\n--- resumed at %s ---\n\n", startedAt)
+	} else {
+		fmt.Fprintf(w, "Started: %s\n", startedAt)
 	}
 	fmt.Fprintf(w, "Logs: %s\n\n", logDir)
 
