@@ -17,7 +17,9 @@ func consoleOutput(f *os.File, mode string) (out io.Writer, flush func(), err er
 		return nil, nil, err
 	}
 	if !color.Enabled(m, f, os.Getenv) {
-		return f, func() {}, nil
+		return f, func() {
+			// Intentionally empty: f is written to directly, so no line is held back.
+		}, nil
 	}
 	w := color.NewWriter(f)
 	return w, func() { _ = w.Flush() }, nil
