@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -2224,6 +2225,48 @@ func TestExecute_sessionLogContainsNarrativeOutput(t *testing.T) {
 	}
 	if !strings.Contains(content, "done") {
 		t.Errorf("expected 'done' in session.log:\n%s", content)
+	}
+}
+
+func TestExecute_stampsConsoleAndSessionLog(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.5.0")
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	var console bytes.Buffer
+	logBaseDir := t.TempDir()
+	if err := release.Execute(&console, stages, ws, fr, logBaseDir, defaultOpts()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	entries, err := os.ReadDir(logBaseDir)
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("expected a run directory: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(logBaseDir, entries[0].Name(), "session.log"))
+	if err != nil {
+		t.Fatalf("reading session.log: %v", err)
+	}
+
+	stamped := regexp.MustCompile(`^\d{2}:\d{2}:\d{2}  `)
+	for name, output := range map[string]string{"console": console.String(), "session.log": string(data)} {
+		for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+			if line != "" && !stamped.MatchString(line) {
+				t.Errorf("%s line has no timestamp: %q", name, line)
+			}
+		}
+		if !strings.Contains(output, "Started: ") {
+			t.Errorf("expected a 'Started:' line in %s:\n%s", name, output)
+		}
+	}
+	if console.String() != string(data) {
+		t.Errorf("console and session.log differ:\nconsole:\n%s\nsession.log:\n%s", console.String(), data)
 	}
 }
 

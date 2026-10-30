@@ -643,6 +643,14 @@ Maven Central verification, and changelog steps. POM update commits get a
 separate `<library>-pom-update.log` file. Log files are written in real time,
 so you can `tail -f` them during a long release run.
 
+The run's progress output, which is what `release` prints and what ends up in
+`session.log`, starts every line with the time of day, such as
+`21:40:21  Stage 1: releasing kiwi-parent`. The first line says the date the
+run started, and a resumed run says the date on its `--- resumed at ... ---`
+line. A run that goes past midnight gets a `--- 2026-10-23 ---` line where the
+date changes. The per-library log files are copies of what Maven and the
+changelog script printed, so they have no added timestamps.
+
 Set `log_retention_days` to automatically delete run directories older than
 that many days at the end of each successful release, without prompting. It's
 disabled by default (`0`); nothing is deleted unless you set it. Past runs can
