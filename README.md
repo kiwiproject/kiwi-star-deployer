@@ -656,6 +656,23 @@ that many days at the end of each successful release, without prompting. It's
 disabled by default (`0`); nothing is deleted unless you set it. Past runs can
 be listed and manually purged with the [logs](#logs) command.
 
+## Color
+
+On a terminal, `release` colors its console output so the stages and results
+are easy to spot: stage headers in bold cyan, `[PASS]`, `done`, `CI passed`
+and `Released` in green, `[FAIL]`, `FAILED` and `error:` in red, skips and
+retries in yellow, and the CI polling lines and timestamps dimmed. Whole lines
+are colored, mostly based on how they start; retries and CI problems are
+recognized by a key phrase. `session.log` is always plain text, so
+it can be searched with `grep` and pasted into an issue.
+
+The `release` command's `--color` flag takes `auto` (the default),
+`always` or `never`. With `auto`, color is used only when the output is a
+terminal, and the `NO_COLOR` environment variable (set to anything) or
+`TERM=dumb` turns it off. `--color always` uses color even when the output is
+piped, for example into `less -R`, and it overrides `NO_COLOR`. Other
+commands do not use color yet.
+
 ## Resetting to a clean slate
 
 If the workspace or state file get into a confusing state, no special

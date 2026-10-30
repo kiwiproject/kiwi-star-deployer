@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kiwiproject/kiwi-star-deployer/internal/color"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/plan"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/release"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/runner"
@@ -2267,6 +2268,44 @@ func TestExecute_stampsConsoleAndSessionLog(t *testing.T) {
 	}
 	if console.String() != string(data) {
 		t.Errorf("console and session.log differ:\nconsole:\n%s\nsession.log:\n%s", console.String(), data)
+	}
+}
+
+func TestExecute_coloredConsoleKeepsSessionLogPlain(t *testing.T) {
+	dir := t.TempDir()
+	ws := workspace.New(dir, &prepareSuccessRunner{})
+
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.5.0")
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	var console bytes.Buffer
+	colored := color.NewWriter(&console)
+	logBaseDir := t.TempDir()
+	if err := release.Execute(colored, stages, ws, fr, logBaseDir, defaultOpts()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := colored.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	entries, err := os.ReadDir(logBaseDir)
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("expected a run directory: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(logBaseDir, entries[0].Name(), "session.log"))
+	if err != nil {
+		t.Fatalf("reading session.log: %v", err)
+	}
+
+	if strings.Contains(string(data), "\x1b[") {
+		t.Errorf("session.log must stay plain text, got:\n%q", data)
+	}
+	if !strings.Contains(console.String(), "\x1b[1;36m") || !strings.Contains(console.String(), "\x1b[32m") {
+		t.Errorf("expected the console to have a colored stage header and done line, got:\n%q", console.String())
 	}
 }
 
