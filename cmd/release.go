@@ -24,6 +24,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// colorMode is the value of release --color.
+var colorMode string
+
 var releaseCmd = &cobra.Command{
 	Use:   "release",
 	Short: "Release kiwiproject libraries in dependency order",
@@ -77,9 +80,15 @@ func runRelease(_ *cobra.Command, _ []string) error {
 
 	r := runner.NewOsRunner()
 
+	out, flush, err := consoleOutput(os.Stdout, colorMode)
+	if err != nil {
+		return err
+	}
+	defer flush()
+
 	if !dryRun {
 		results := preflight.RunAll(r, cfg.Settings.ChangelogScript)
-		preflight.Print(os.Stdout, results)
+		preflight.Print(out, results)
 		if !preflight.AllPassed(results) {
 			return fmt.Errorf("preflight failed; fix the issues above before releasing")
 		}
@@ -96,7 +105,7 @@ func runRelease(_ *cobra.Command, _ []string) error {
 			gateLibs := selectLibraries(cfg.Libraries, onlyLibs)
 			fmt.Fprintf(os.Stderr, "Checking %d %s against GitHub milestones...\n", len(gateLibs), libNoun(len(gateLibs)))
 			cvResults := checkversions.RunAll(r, gateLibs)
-			checkversions.Print(os.Stdout, cvResults)
+			checkversions.Print(out, cvResults)
 			if !checkversions.AllPassed(cvResults) {
 				return fmt.Errorf("version check failed; fix the mismatches above before releasing")
 			}
@@ -116,8 +125,8 @@ func runRelease(_ *cobra.Command, _ []string) error {
 	}
 
 	if dryRun {
-		plan.Print(os.Stdout, stages)
-		printMilestoneNote(os.Stdout)
+		plan.Print(out, stages)
+		printMilestoneNote(out)
 		return nil
 	}
 
@@ -187,12 +196,12 @@ func runRelease(_ *cobra.Command, _ []string) error {
 		opts.IssueCreator = &ghissue.Creator{Runner: r}
 	}
 
-	if err := release.Execute(os.Stdout, stages, ws, r, logBaseDir, opts); err != nil {
+	if err := release.Execute(out, stages, ws, r, logBaseDir, opts); err != nil {
 		return err
 	}
 
 	excludeDir := filepath.Base(sw.LogDir())
-	if err := autoPurgeLogs(os.Stdout, logBaseDir, excludeDir, cfg.Settings.LogRetentionDays); err != nil {
+	if err := autoPurgeLogs(out, logBaseDir, excludeDir, cfg.Settings.LogRetentionDays); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: auto-purging old logs: %v\n", err)
 	}
 	return nil
@@ -269,6 +278,7 @@ func init() {
 	rootCmd.AddCommand(releaseCmd)
 	releaseCmd.Flags().BoolVar(&resume, "resume", false, "resume from a previous failed run")
 	releaseCmd.Flags().StringArrayVar(&skipLibs, "skip", nil, "treat library as already released (requires --resume)")
+	releaseCmd.Flags().StringVar(&colorMode, "color", "auto", "color the output: auto, always or never (auto uses color on a terminal unless NO_COLOR is set)")
 	releaseCmd.Flags().BoolVar(&dryRun, "dry-run", false, "show the release plan without executing any release steps")
 	releaseCmd.Flags().StringSliceVar(&onlyLibs, "only", nil, "release only these libraries (comma-separated)")
 	releaseCmd.Flags().StringArrayVar(&summaryFlags, "summary", nil, "prepend summary text to changelog for a library (libname=text, repeatable)")
