@@ -13,3 +13,9 @@ order.
 ## Checks
 
 Run `make check` (go vet, tests with -race, golangci-lint) before committing.
+
+## Console colors
+
+The release console is colored by matching the text of the messages it prints,
+not by the code that prints them. If you change or add a message, read the
+package comment in internal/color, which says what to check.

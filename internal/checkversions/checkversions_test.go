@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/kiwiproject/kiwi-star-deployer/internal/checkversions"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/color"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/color/colortest"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/config"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/runner"
 )
@@ -259,4 +261,24 @@ func TestPrint_showsPassAndFail(t *testing.T) {
 	if !strings.Contains(out, "3.1.0") {
 		t.Errorf("expected failure detail in output:\n%s", out)
 	}
+}
+
+// The color writer picks a line's color from the text that Print writes, so
+// run the real status markers through it.
+func TestPrint_statusColors(t *testing.T) {
+	results := []checkversions.Result{
+		{Name: "kiwi", OK: true, WantVersion: "1.0.0"},
+		{Name: "kiwi-bom", OK: false, WantVersion: "2.0.0", Message: "no milestone"},
+	}
+	var buf bytes.Buffer
+	cw := color.NewWriter(&buf)
+	checkversions.Print(cw, results)
+	if err := cw.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	colortest.Check(t, buf.String(),
+		colortest.Want{Contains: "[PASS]", Code: colortest.Green},
+		colortest.Want{Contains: "[FAIL]", Code: colortest.Red},
+	)
 }

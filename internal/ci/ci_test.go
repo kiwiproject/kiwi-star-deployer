@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/kiwiproject/kiwi-star-deployer/internal/ci"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/color"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/color/colortest"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/runner"
 )
 
@@ -424,4 +426,52 @@ func TestGHChecker_verifiesRunListArgs(t *testing.T) {
 			t.Errorf("expected %q in gh run view args: %s", want, viewArgs)
 		}
 	}
+}
+
+// The color writer picks a line's color from the text that Wait prints. These
+// tests run the real messages through it, so rewording one of them fails here
+// and not silently on somebody's terminal.
+
+func coloredWait(t *testing.T, fr *runner.FakeRunner) string {
+	t.Helper()
+	var buf bytes.Buffer
+	cw := color.NewWriter(&buf)
+	_ = newChecker(fr).Wait(cw, "kiwiproject/kiwi", "abc123def456", time.Minute, time.Millisecond)
+	if err := cw.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	return buf.String()
+}
+
+func TestGHChecker_messageColors_polling(t *testing.T) {
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: runListEmpty}, nil) // gh run list (empty)
+	fr.AddResponse(&runner.Result{Stdout: workflowsOne}, nil) // gh api workflows (has CI)
+	fr.AddResponse(&runner.Result{Stdout: runListOne}, nil)   // gh run list (found)
+	fr.AddResponse(&runner.Result{Stdout: runInProgress}, nil)
+	fr.AddResponse(&runner.Result{Stdout: runListOne}, nil)
+	fr.AddResponse(&runner.Result{Stdout: runSuccess}, nil)
+
+	out := coloredWait(t, fr)
+
+	colortest.Check(t, out,
+		colortest.Want{Contains: "status: in_progress", Code: colortest.Dim},
+		colortest.Want{Contains: "waiting for run to appear"},
+	)
+}
+
+func TestGHChecker_messageColors_problems(t *testing.T) {
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(nil, errors.New("exit status 1"))          // gh run list fails: poll failure
+	fr.AddResponse(&runner.Result{Stdout: runListEmpty}, nil) // gh run list (empty)
+	fr.AddResponse(nil, errors.New("exit status 1"))          // gh api workflows fails
+	fr.AddResponse(&runner.Result{Stdout: runListOne}, nil)   // gh run list (found)
+	fr.AddResponse(&runner.Result{Stdout: runSuccess}, nil)   // gh run view
+
+	out := coloredWait(t, fr)
+
+	colortest.Check(t, out,
+		colortest.Want{Contains: "poll failed", Code: colortest.Yellow},
+		colortest.Want{Contains: "could not check workflows", Code: colortest.Yellow},
+	)
 }

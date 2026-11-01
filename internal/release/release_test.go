@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kiwiproject/kiwi-star-deployer/internal/color"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/color/colortest"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/plan"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/release"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/runner"
@@ -2307,6 +2308,127 @@ func TestExecute_coloredConsoleKeepsSessionLogPlain(t *testing.T) {
 	if !strings.Contains(console.String(), "\x1b[1;36m") || !strings.Contains(console.String(), "\x1b[32m") {
 		t.Errorf("expected the console to have a colored stage header and done line, got:\n%q", console.String())
 	}
+}
+
+// The color writer picks a line's color from the text that Execute prints.
+// These tests run the real messages through it, so rewording one of them
+// fails here and not silently on somebody's terminal.
+
+func coloredOutput(t *testing.T, run func(w io.Writer) error) (out string, err error) {
+	t.Helper()
+	var buf bytes.Buffer
+	cw := color.NewWriter(&buf)
+	err = run(cw)
+	if flushErr := cw.Flush(); flushErr != nil {
+		t.Fatalf("flush: %v", flushErr)
+	}
+	return buf.String(), err
+}
+
+func TestExecute_messageColors_success(t *testing.T) {
+	ws := workspace.New(t.TempDir(), &prepareSuccessRunner{})
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.9.0")                       // kiwi-parent
+	addPOMUpdateResponses(fr)                               // kiwi POM update
+	fr.AddResponse(&runner.Result{Stdout: "abc123\n"}, nil) // git rev-parse HEAD
+	addLibraryResponses(fr, "v2.5.0")                       // kiwi
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+	opts := defaultOpts()
+	opts.CIChecker = &fakeCIChecker{}
+	opts.CIMaxWait = time.Minute
+	opts.CIPollInterval = time.Millisecond
+
+	out, err := coloredOutput(t, func(w io.Writer) error {
+		return release.Execute(w, stages, ws, fr, t.TempDir(), opts)
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	colortest.Check(t, out,
+		colortest.Want{Contains: "Stage 1:", Code: colortest.BoldCyan},
+		colortest.Want{Contains: "done    kiwi-parent", Code: colortest.Green},
+		colortest.Want{Contains: "done   POM update kiwi", Code: colortest.Green},
+		colortest.Want{Contains: "CI passed kiwi", Code: colortest.Green},
+		colortest.Want{Contains: "Released 2 libraries.", Code: colortest.Green},
+		// Plain progress lines.
+		colortest.Want{Contains: "POM update kiwi:"},
+		colortest.Want{Contains: "CI verify kiwi..."},
+		colortest.Want{Contains: "Logs: "},
+		colortest.Want{Contains: "Started: "},
+	)
+}
+
+func TestExecute_messageColors_failure(t *testing.T) {
+	ws := workspace.New(t.TempDir(), &prepareSuccessRunner{})
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: "v2.5.0"}, nil) // git describe succeeds
+	fr.AddResponse(nil, errors.New("exit status 1"))      // mvn fails
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	out, err := coloredOutput(t, func(w io.Writer) error {
+		return release.Execute(w, stages, ws, fr, t.TempDir(), defaultOpts())
+	})
+	if err == nil {
+		t.Fatal("expected the release to fail")
+	}
+
+	colortest.Check(t, out,
+		colortest.Want{Contains: "FAILED  kiwi", Code: colortest.Red},
+		colortest.Want{Contains: "error:  mvn release", Code: colortest.Red},
+		colortest.Want{Contains: "log:    "},
+	)
+}
+
+func TestExecute_messageColors_failedPOMUpdate(t *testing.T) {
+	ws := workspace.New(t.TempDir(), &prepareSuccessRunner{})
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.9.0")                // kiwi-parent
+	fr.AddResponse(nil, errors.New("exit status 1")) // kiwi POM update: mvn versions fails
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+
+	out, err := coloredOutput(t, func(w io.Writer) error {
+		return release.Execute(w, stages, ws, fr, t.TempDir(), defaultOpts())
+	})
+	if err == nil {
+		t.Fatal("expected the release to fail")
+	}
+
+	colortest.Check(t, out, colortest.Want{Contains: "FAILED POM update kiwi", Code: colortest.Red})
+}
+
+func TestExecute_messageColors_autoSkip(t *testing.T) {
+	ws := workspace.New(t.TempDir(), &prepareSuccessRunner{})
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: "abc1234 [maven-release-plugin] prepare for next development iteration\ndef5678 [maven-release-plugin] prepare release v2.5.0\n"}, nil)
+	fr.AddResponse(&runner.Result{Stdout: "v2.5.0\n"}, nil)
+	fr.AddResponse(&runner.Result{Stdout: "{}"}, nil)
+
+	stages := makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+	opts := defaultOpts()
+	opts.SkipUnchanged = true
+
+	out, err := coloredOutput(t, func(w io.Writer) error {
+		return release.Execute(w, stages, ws, fr, t.TempDir(), opts)
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	colortest.Check(t, out, colortest.Want{Contains: "skip    kiwi", Code: colortest.Yellow})
 }
 
 func TestExecute_sessionLogAppendsOnResume(t *testing.T) {

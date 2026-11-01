@@ -2,6 +2,14 @@
 // results and problems stand out. Lines are colored from how they start, which
 // keeps the print sites free of escape codes and lets the same text go
 // uncolored to the session log.
+//
+// That makes the colors depend on the wording of the messages that the release
+// prints (in internal/release, internal/ci, internal/preflight and
+// internal/checkversions). The rules below are heuristics, so a message that
+// is reworded or added can lose its color, or get the wrong one, without any
+// compile error. Tests in those packages run the real messages through the
+// color Writer and check the result; when one fails after a message change,
+// update the message or the rules so they agree.
 package color
 
 import (

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kiwiproject/kiwi-star-deployer/internal/color"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/color/colortest"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/preflight"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/runner"
 )
@@ -223,4 +225,24 @@ func TestPrint_showsPassAndFail(t *testing.T) {
 	if !strings.Contains(out, "mvn not found on PATH") {
 		t.Errorf("expected failure message in output:\n%s", out)
 	}
+}
+
+// The color writer picks a line's color from the text that Print writes, so
+// run the real status markers through it.
+func TestPrint_statusColors(t *testing.T) {
+	results := []preflight.Result{
+		{Name: "git", OK: true},
+		{Name: "mvn", OK: false, Message: "mvn not found on PATH"},
+	}
+	var buf bytes.Buffer
+	cw := color.NewWriter(&buf)
+	preflight.Print(cw, results)
+	if err := cw.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	colortest.Check(t, buf.String(),
+		colortest.Want{Contains: "[PASS]", Code: colortest.Green},
+		colortest.Want{Contains: "[FAIL]", Code: colortest.Red},
+	)
 }
