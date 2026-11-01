@@ -1,11 +1,16 @@
 package cmd
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kiwiproject/kiwi-star-deployer/internal/runner"
 )
 
 func outputFile(t *testing.T) *os.File {
@@ -86,5 +91,83 @@ func TestColorFlagIsOnlyOnTheCommandsThatColor(t *testing.T) {
 		if got := c.Flags().Lookup("color") != nil; got != want {
 			t.Errorf("%s: has --color = %v, want %v", c.Name(), got, want)
 		}
+	}
+}
+
+// failingRunner makes every command fail, so every check reports [FAIL].
+type failingRunner struct{}
+
+func (failingRunner) Run(runner.Options) (*runner.Result, error) {
+	return nil, errors.New("exit status 1")
+}
+
+func TestReportPreflight_colorsOnlyWhenAsked(t *testing.T) {
+	tests := []struct {
+		mode      string
+		wantColor bool
+	}{
+		{"always", true},
+		{"never", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.mode, func(t *testing.T) {
+			f := outputFile(t)
+
+			err := reportPreflight(f, tt.mode, failingRunner{}, "no-such-changelog-script")
+
+			if err == nil || !strings.Contains(err.Error(), "preflight failed") {
+				t.Errorf("expected preflight to fail, got %v", err)
+			}
+			got := contents(t, f)
+			if !strings.Contains(got, "[FAIL]") {
+				t.Errorf("expected failed checks in:\n%s", got)
+			}
+			if colored := strings.Contains(got, "\x1b[31m[FAIL]"); colored != tt.wantColor {
+				t.Errorf("colored = %v, want %v in %q", colored, tt.wantColor, got)
+			}
+		})
+	}
+}
+
+func TestReportPreflight_invalidColorMode(t *testing.T) {
+	err := reportPreflight(outputFile(t), "sometimes", failingRunner{}, "x")
+	if err == nil || !strings.Contains(err.Error(), "invalid --color") {
+		t.Errorf("expected an invalid mode error, got %v", err)
+	}
+}
+
+func TestReportVersions_colorsOnlyWhenAsked(t *testing.T) {
+	tests := []struct {
+		mode      string
+		wantColor bool
+	}{
+		{"always", true},
+		{"never", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.mode, func(t *testing.T) {
+			f := outputFile(t)
+			var progress bytes.Buffer
+
+			err := reportVersions(f, &progress, tt.mode, failingRunner{}, changesLibs())
+
+			if err == nil || !strings.Contains(err.Error(), "version check failed") {
+				t.Errorf("expected the version check to fail, got %v", err)
+			}
+			if !strings.Contains(progress.String(), "Checking 1 library against GitHub milestones") {
+				t.Errorf("unexpected progress output: %q", progress.String())
+			}
+			got := contents(t, f)
+			if colored := strings.Contains(got, "\x1b[31m[FAIL]"); colored != tt.wantColor {
+				t.Errorf("colored = %v, want %v in %q", colored, tt.wantColor, got)
+			}
+		})
+	}
+}
+
+func TestReportVersions_invalidColorMode(t *testing.T) {
+	err := reportVersions(outputFile(t), io.Discard, "sometimes", failingRunner{}, changesLibs())
+	if err == nil || !strings.Contains(err.Error(), "invalid --color") {
+		t.Errorf("expected an invalid mode error, got %v", err)
 	}
 }
