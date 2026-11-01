@@ -17,6 +17,12 @@ var checkVersionsCmd = &cobra.Command{
 }
 
 func runCheckVersions(_ *cobra.Command, _ []string) error {
+	out, flush, err := consoleOutput(os.Stdout, colorMode)
+	if err != nil {
+		return err
+	}
+	defer flush()
+
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return err
@@ -24,7 +30,7 @@ func runCheckVersions(_ *cobra.Command, _ []string) error {
 
 	fmt.Fprintf(os.Stderr, "Checking %d %s against GitHub milestones...\n", len(cfg.Libraries), libNoun(len(cfg.Libraries)))
 	results := checkversions.RunAll(runner.NewOsRunner(), cfg.Libraries)
-	checkversions.Print(os.Stdout, results)
+	checkversions.Print(out, results)
 	if !checkversions.AllPassed(results) {
 		return fmt.Errorf("version check failed")
 	}
@@ -33,4 +39,5 @@ func runCheckVersions(_ *cobra.Command, _ []string) error {
 
 func init() {
 	rootCmd.AddCommand(checkVersionsCmd)
+	addColorFlag(checkVersionsCmd)
 }

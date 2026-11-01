@@ -24,9 +24,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// colorMode is the value of release --color.
-var colorMode string
-
 var releaseCmd = &cobra.Command{
 	Use:   "release",
 	Short: "Release kiwiproject libraries in dependency order",
@@ -278,7 +275,7 @@ func init() {
 	rootCmd.AddCommand(releaseCmd)
 	releaseCmd.Flags().BoolVar(&resume, "resume", false, "resume from a previous failed run")
 	releaseCmd.Flags().StringArrayVar(&skipLibs, "skip", nil, "treat library as already released (requires --resume)")
-	releaseCmd.Flags().StringVar(&colorMode, "color", "auto", "color the output: auto, always or never (auto uses color on a terminal unless NO_COLOR is set)")
+	addColorFlag(releaseCmd)
 	releaseCmd.Flags().BoolVar(&dryRun, "dry-run", false, "show the release plan without executing any release steps")
 	releaseCmd.Flags().StringSliceVar(&onlyLibs, "only", nil, "release only these libraries (comma-separated)")
 	releaseCmd.Flags().StringArrayVar(&summaryFlags, "summary", nil, "prepend summary text to changelog for a library (libname=text, repeatable)")

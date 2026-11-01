@@ -17,13 +17,19 @@ var preflightCmd = &cobra.Command{
 }
 
 func runPreflight(_ *cobra.Command, _ []string) error {
+	out, flush, err := consoleOutput(os.Stdout, colorMode)
+	if err != nil {
+		return err
+	}
+	defer flush()
+
 	changelogScript := ".generate-kiwi-changelog"
 	if cfg, err := config.Load(configPath); err == nil {
 		changelogScript = cfg.Settings.ChangelogScript
 	}
 
 	results := preflight.RunAll(runner.NewOsRunner(), changelogScript)
-	preflight.Print(os.Stdout, results)
+	preflight.Print(out, results)
 	if !preflight.AllPassed(results) {
 		return fmt.Errorf("preflight failed")
 	}
@@ -32,4 +38,5 @@ func runPreflight(_ *cobra.Command, _ []string) error {
 
 func init() {
 	rootCmd.AddCommand(preflightCmd)
+	addColorFlag(preflightCmd)
 }

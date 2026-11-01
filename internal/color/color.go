@@ -1,7 +1,8 @@
-// Package color colors the lines a release prints on the console so stages,
-// results and problems stand out. Lines are colored from how they start, which
-// keeps the print sites free of escape codes and lets the same text go
-// uncolored to the session log.
+// Package color colors the lines that the release, preflight and
+// check-versions commands print on the console so stages, results and
+// problems stand out. Lines are colored from how they start, which keeps the
+// print sites free of escape codes and lets the same text go uncolored to
+// the session log.
 //
 // That makes the colors depend on the wording of the messages that the release
 // prints (in internal/release, internal/ci, internal/preflight and

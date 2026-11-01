@@ -79,3 +79,12 @@ func TestConsoleOutput_alwaysColorsAndFlushWritesTheLastLine(t *testing.T) {
 		t.Errorf("expected flush to write the last line in green, got %q", got)
 	}
 }
+
+func TestColorFlagIsOnlyOnTheCommandsThatColor(t *testing.T) {
+	for _, c := range rootCmd.Commands() {
+		want := c.Name() == "release" || c.Name() == "preflight" || c.Name() == "check-versions"
+		if got := c.Flags().Lookup("color") != nil; got != want {
+			t.Errorf("%s: has --color = %v, want %v", c.Name(), got, want)
+		}
+	}
+}
