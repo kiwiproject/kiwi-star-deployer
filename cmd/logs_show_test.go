@@ -4,9 +4,12 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
 )
 
 // writeSessionLog creates a run directory under logsDir holding a session.log
@@ -179,5 +182,57 @@ func waitFor(t *testing.T, cond func() bool) {
 			t.Fatal("timed out waiting for the expected output")
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+// runShowCommand runs runLogsShow against a config whose logs directory is
+// logsDir, with os.Stdout replaced by a file, and returns what it printed.
+func runShowCommand(t *testing.T, logsDir string, args ...string) (string, error) {
+	t.Helper()
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	cfg := "[settings]\nworkspace = " + strconv.Quote(filepath.Join(filepath.Dir(logsDir), "workspace")) + "\n"
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout := outputFile(t)
+	oldConfigPath, oldStdout, oldColor := configPath, os.Stdout, colorMode
+	t.Cleanup(func() { configPath, os.Stdout, colorMode = oldConfigPath, oldStdout, oldColor })
+	configPath, os.Stdout, colorMode = cfgPath, stdout, "never"
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	err := runLogsShow(cmd, args)
+	return contents(t, stdout), err
+}
+
+func TestRunLogsShow_printsTheNamedRunFromTheConfiguredLogsDir(t *testing.T) {
+	logsDir := makeDir(t, t.TempDir(), "logs")
+	writeSessionLog(t, logsDir, "2026-01-15T09-30-00", "first run\n")
+	writeSessionLog(t, logsDir, "2026-01-16T10-00-00", "second run\n")
+
+	got, err := runShowCommand(t, logsDir, "2026-01-15T09-30-00")
+
+	if err != nil || got != "first run\n" {
+		t.Errorf("got (%q, %v), want the first run's log", got, err)
+	}
+}
+
+func TestRunLogsShow_configLoadError(t *testing.T) {
+	oldConfigPath := configPath
+	t.Cleanup(func() { configPath = oldConfigPath })
+	configPath = filepath.Join(t.TempDir(), "missing.toml")
+
+	if err := runLogsShow(&cobra.Command{}, nil); err == nil {
+		t.Error("expected an error for a missing config")
+	}
+}
+
+func TestShowLog_logsDirectoryThatCannotBeRead(t *testing.T) {
+	notADir := writeSessionLog(t, t.TempDir(), "2026-01-15T09-30-00", "x\n")
+
+	err := showLog(context.Background(), outputFile(t), "never", notADir, "", false, time.Millisecond)
+
+	if err == nil || !strings.Contains(err.Error(), "reading logs directory") {
+		t.Errorf("expected a reading error, got %v", err)
 	}
 }
