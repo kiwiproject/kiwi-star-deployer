@@ -22,8 +22,21 @@ func runPreflight(_ *cobra.Command, _ []string) error {
 		changelogScript = cfg.Settings.ChangelogScript
 	}
 
-	results := preflight.RunAll(runner.NewOsRunner(), changelogScript)
-	preflight.Print(os.Stdout, results)
+	return reportPreflight(os.Stdout, colorMode, runner.NewOsRunner(), changelogScript)
+}
+
+// reportPreflight runs the preflight checks and prints the results to f, in
+// color when mode and the environment call for it. It returns an error when
+// any check failed.
+func reportPreflight(f *os.File, mode string, r runner.Runner, changelogScript string) error {
+	out, flush, err := consoleOutput(f, mode)
+	if err != nil {
+		return err
+	}
+	defer flush()
+
+	results := preflight.RunAll(r, changelogScript)
+	preflight.Print(out, results)
 	if !preflight.AllPassed(results) {
 		return fmt.Errorf("preflight failed")
 	}
@@ -32,4 +45,5 @@ func runPreflight(_ *cobra.Command, _ []string) error {
 
 func init() {
 	rootCmd.AddCommand(preflightCmd)
+	addColorFlag(preflightCmd)
 }

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/kiwiproject/kiwi-star-deployer/internal/checkversions"
@@ -22,9 +23,23 @@ func runCheckVersions(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	fmt.Fprintf(os.Stderr, "Checking %d %s against GitHub milestones...\n", len(cfg.Libraries), libNoun(len(cfg.Libraries)))
-	results := checkversions.RunAll(runner.NewOsRunner(), cfg.Libraries)
-	checkversions.Print(os.Stdout, results)
+	return reportVersions(os.Stdout, os.Stderr, colorMode, runner.NewOsRunner(), cfg.Libraries)
+}
+
+// reportVersions checks the libraries' versions against their milestones and
+// prints the results to f, in color when mode and the environment call for
+// it, with the progress line going to progress. It returns an error when any
+// check failed.
+func reportVersions(f *os.File, progress io.Writer, mode string, r runner.Runner, libs map[string]config.Library) error {
+	out, flush, err := consoleOutput(f, mode)
+	if err != nil {
+		return err
+	}
+	defer flush()
+
+	fmt.Fprintf(progress, "Checking %d %s against GitHub milestones...\n", len(libs), libNoun(len(libs)))
+	results := checkversions.RunAll(r, libs)
+	checkversions.Print(out, results)
 	if !checkversions.AllPassed(results) {
 		return fmt.Errorf("version check failed")
 	}
@@ -33,4 +48,5 @@ func runCheckVersions(_ *cobra.Command, _ []string) error {
 
 func init() {
 	rootCmd.AddCommand(checkVersionsCmd)
+	addColorFlag(checkVersionsCmd)
 }
