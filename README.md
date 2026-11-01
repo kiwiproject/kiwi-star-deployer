@@ -557,6 +557,7 @@ Inspects and manages release run log directories.
 
 ```sh
 kiwi-star-deployer logs list
+kiwi-star-deployer logs show [run] [-f]
 kiwi-star-deployer logs purge --older-than 30d
 ```
 
@@ -565,6 +566,13 @@ and whether the run failed (and at which step). `logs purge` deletes run
 directories older than the given age — Go durations like `24h` or day counts
 like `30d` — after listing what will be deleted and prompting for
 confirmation; pass `--yes` to skip the prompt.
+
+`logs show` prints a run's `session.log`, colored like the release console (see
+[Color](#color); it takes the same `--color` flag). The run can be a directory
+name or the run ID that `logs list` prints, and defaults to the latest run.
+With `-f`/`--follow` it keeps printing new output as the file grows, checking
+once a second, until you press Ctrl-C, so you can watch a release from another
+terminal.
 
 ## How stages work
 
@@ -658,13 +666,13 @@ be listed and manually purged with the [logs](#logs) command.
 
 ## Color
 
-On a terminal, `release`, `preflight` and `check-versions` color their console
-output so the stages and results are easy to spot: stage headers in bold
-cyan, `[PASS]`, `done`, `CI passed` and `Released` in green, `[FAIL]`, `FAILED` and `error:` in red, skips and
-retries in yellow, and the CI polling lines and timestamps dimmed. Whole lines
-are colored, mostly based on how they start; retries and CI problems are
-recognized by a key phrase. `session.log` is always plain text, so
-it can be searched with `grep` and pasted into an issue.
+On a terminal, `release`, `preflight`, `check-versions` and `logs show` color
+their console output so the stages and results are easy to spot: stage headers
+in bold cyan, `[PASS]`, `done`, `CI passed` and `Released` in green, `[FAIL]`,
+`FAILED` and `error:` in red, skips and retries in yellow, and the CI polling
+lines and timestamps dimmed. Whole lines are colored, mostly based on how they
+start; retries and CI problems are recognized by a key phrase. `session.log` is
+always plain text, so it can be searched with `grep` and pasted into an issue.
 
 The `--color` flag of those commands takes `auto` (the default),
 `always` or `never`. With `auto`, color is used only when the output is a

@@ -40,6 +40,9 @@ var (
 
 const noRunsFound = "No release runs found."
 
+// runDirLayout is the layout of the names of run directories.
+const runDirLayout = "2006-01-02T15-04-05"
+
 func runLogsList(_ *cobra.Command, _ []string) error {
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -125,7 +128,7 @@ func purgeLogs(w io.Writer, r io.Reader, logsDir string, age time.Duration, yes 
 		if !e.IsDir() || e.Name() == exclude {
 			continue
 		}
-		t, err := time.ParseInLocation("2006-01-02T15-04-05", e.Name(), time.Local)
+		t, err := time.ParseInLocation(runDirLayout, e.Name(), time.Local)
 		if err != nil {
 			fmt.Fprintf(w, "skipping %s: not a run directory\n", e.Name())
 			continue
