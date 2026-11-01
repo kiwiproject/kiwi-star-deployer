@@ -263,9 +263,12 @@ func TestPrint_showsPassAndFail(t *testing.T) {
 	}
 }
 
-// The color writer picks a line's color from the text that Print writes, so
-// run the real status markers through it.
-func TestPrint_statusColors(t *testing.T) {
+// ksd release colors its console by matching the start of each line, and it
+// sends the output of checkversions.Print through that color writer. This test pins
+// the wording that matching depends on: if the status markers are reworded,
+// release stops coloring them and this test fails. It says nothing about the
+// standalone command, which does not use the color writer.
+func TestPrint_statusLinesGetReleaseColors(t *testing.T) {
 	results := []checkversions.Result{
 		{Name: "kiwi", OK: true, WantVersion: "1.0.0"},
 		{Name: "kiwi-bom", OK: false, WantVersion: "2.0.0", Message: "no milestone"},
