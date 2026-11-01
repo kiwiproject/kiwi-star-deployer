@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/kiwiproject/kiwi-star-deployer/internal/checkversions"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/color"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/color/colortest"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/config"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/runner"
 )
@@ -259,4 +261,27 @@ func TestPrint_showsPassAndFail(t *testing.T) {
 	if !strings.Contains(out, "3.1.0") {
 		t.Errorf("expected failure detail in output:\n%s", out)
 	}
+}
+
+// ksd release colors its console by matching the start of each line, and it
+// sends the output of checkversions.Print through that color writer. This test pins
+// the wording that matching depends on: if the status markers are reworded,
+// release stops coloring them and this test fails. It says nothing about the
+// standalone command, which does not use the color writer.
+func TestPrint_statusLinesGetReleaseColors(t *testing.T) {
+	results := []checkversions.Result{
+		{Name: "kiwi", OK: true, WantVersion: "1.0.0"},
+		{Name: "kiwi-bom", OK: false, WantVersion: "2.0.0", Message: "no milestone"},
+	}
+	var buf bytes.Buffer
+	cw := color.NewWriter(&buf)
+	checkversions.Print(cw, results)
+	if err := cw.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	colortest.Check(t, buf.String(),
+		colortest.Want{Contains: "[PASS]", Code: colortest.Green},
+		colortest.Want{Contains: "[FAIL]", Code: colortest.Red},
+	)
 }

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kiwiproject/kiwi-star-deployer/internal/color"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/color/colortest"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/preflight"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/runner"
 )
@@ -223,4 +225,27 @@ func TestPrint_showsPassAndFail(t *testing.T) {
 	if !strings.Contains(out, "mvn not found on PATH") {
 		t.Errorf("expected failure message in output:\n%s", out)
 	}
+}
+
+// ksd release colors its console by matching the start of each line, and it
+// sends the output of preflight.Print through that color writer. This test pins
+// the wording that matching depends on: if the status markers are reworded,
+// release stops coloring them and this test fails. It says nothing about the
+// standalone command, which does not use the color writer.
+func TestPrint_statusLinesGetReleaseColors(t *testing.T) {
+	results := []preflight.Result{
+		{Name: "git", OK: true},
+		{Name: "mvn", OK: false, Message: "mvn not found on PATH"},
+	}
+	var buf bytes.Buffer
+	cw := color.NewWriter(&buf)
+	preflight.Print(cw, results)
+	if err := cw.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	colortest.Check(t, buf.String(),
+		colortest.Want{Contains: "[PASS]", Code: colortest.Green},
+		colortest.Want{Contains: "[FAIL]", Code: colortest.Red},
+	)
 }
