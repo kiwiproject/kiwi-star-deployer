@@ -557,7 +557,7 @@ Inspects and manages release run log directories.
 
 ```sh
 kiwi-star-deployer logs list
-kiwi-star-deployer logs show [run] [-f]
+kiwi-star-deployer logs show [run] [-f] [--library kiwi]
 kiwi-star-deployer logs purge --older-than 30d
 ```
 
@@ -572,7 +572,9 @@ confirmation; pass `--yes` to skip the prompt.
 name or the run ID that `logs list` prints, and defaults to the latest run.
 With `-f`/`--follow` it keeps printing new output as the file grows, checking
 once a second, until you press Ctrl-C, so you can watch a release from another
-terminal.
+terminal. With `--library kiwi` it prints that library's own log (`kiwi.log`,
+or `kiwi-pom-update` for its POM update) instead; those are the raw Maven and
+git output, so they are never colored.
 
 ## How stages work
 

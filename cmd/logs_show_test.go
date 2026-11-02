@@ -29,7 +29,7 @@ func TestShowLog_printsTheLatestRunByDefault(t *testing.T) {
 	writeSessionLog(t, logsDir, "2026-01-16T10-00-00", "latest run\n")
 	f := outputFile(t)
 
-	if err := showLog(context.Background(), f, "never", logsDir, "", false, time.Millisecond); err != nil {
+	if err := showLog(context.Background(), f, showOptions{Mode: "never", LogsDir: logsDir, Interval: time.Millisecond}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -48,7 +48,7 @@ func TestShowLog_namedRunByDirectoryOrRunID(t *testing.T) {
 		t.Run(run, func(t *testing.T) {
 			f := outputFile(t)
 
-			if err := showLog(context.Background(), f, "never", logsDir, run, false, time.Millisecond); err != nil {
+			if err := showLog(context.Background(), f, showOptions{Mode: "never", LogsDir: logsDir, Run: run, Interval: time.Millisecond}); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
@@ -65,7 +65,7 @@ func TestShowLog_ignoresDirectoriesThatAreNotRuns(t *testing.T) {
 	makeDir(t, logsDir, "tmp")
 	f := outputFile(t)
 
-	if err := showLog(context.Background(), f, "never", logsDir, "", false, time.Millisecond); err != nil {
+	if err := showLog(context.Background(), f, showOptions{Mode: "never", LogsDir: logsDir, Interval: time.Millisecond}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -83,7 +83,7 @@ func TestShowLog_aResumedRunIDShowsTheNewestAttempt(t *testing.T) {
 	}
 	f := outputFile(t)
 
-	if err := showLog(context.Background(), f, "never", logsDir, "2026-01-15T09:30:00Z", false, time.Millisecond); err != nil {
+	if err := showLog(context.Background(), f, showOptions{Mode: "never", LogsDir: logsDir, Run: "2026-01-15T09:30:00Z", Interval: time.Millisecond}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -97,10 +97,10 @@ func TestShowLog_colorsLikeTheConsoleOnlyWhenAsked(t *testing.T) {
 	writeSessionLog(t, logsDir, "2026-01-15T09-30-00", "21:40:21  Stage 1: releasing kiwi\n")
 
 	colored, plain := outputFile(t), outputFile(t)
-	if err := showLog(context.Background(), colored, "always", logsDir, "", false, time.Millisecond); err != nil {
+	if err := showLog(context.Background(), colored, showOptions{Mode: "always", LogsDir: logsDir, Interval: time.Millisecond}); err != nil {
 		t.Fatal(err)
 	}
-	if err := showLog(context.Background(), plain, "never", logsDir, "", false, time.Millisecond); err != nil {
+	if err := showLog(context.Background(), plain, showOptions{Mode: "never", LogsDir: logsDir, Interval: time.Millisecond}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -128,12 +128,12 @@ func TestShowLog_errors(t *testing.T) {
 		{"no logs directory", filepath.Join(t.TempDir(), "logs"), "", "never", "no release runs found"},
 		{"no runs", t.TempDir(), "", "never", "no release runs found"},
 		{"unknown run", logsDir, "nope", "never", `run "nope" not found`},
-		{"run without a session log", noLog, "", "never", "opening the session log"},
+		{"run without a session log", noLog, "", "never", "opening session.log"},
 		{"invalid color mode", logsDir, "", "sometimes", "invalid --color"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := showLog(context.Background(), outputFile(t), tt.mode, tt.logsDir, tt.run, false, time.Millisecond)
+			err := showLog(context.Background(), outputFile(t), showOptions{Mode: tt.mode, LogsDir: tt.logsDir, Run: tt.run, Interval: time.Millisecond})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("got %v, want an error containing %q", err, tt.want)
 			}
@@ -149,7 +149,9 @@ func TestShowLog_followPrintsWhatIsAppendedUntilInterrupted(t *testing.T) {
 	defer cancel()
 
 	done := make(chan error, 1)
-	go func() { done <- showLog(ctx, f, "never", logsDir, "", true, time.Millisecond) }()
+	go func() {
+		done <- showLog(ctx, f, showOptions{Mode: "never", LogsDir: logsDir, Follow: true, Interval: time.Millisecond})
+	}()
 
 	waitFor(t, func() bool { return contents(t, f) == "first\n" })
 	appendTo, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
@@ -230,9 +232,100 @@ func TestRunLogsShow_configLoadError(t *testing.T) {
 func TestShowLog_logsDirectoryThatCannotBeRead(t *testing.T) {
 	notADir := writeSessionLog(t, t.TempDir(), "2026-01-15T09-30-00", "x\n")
 
-	err := showLog(context.Background(), outputFile(t), "never", notADir, "", false, time.Millisecond)
+	err := showLog(context.Background(), outputFile(t), showOptions{Mode: "never", LogsDir: notADir, Interval: time.Millisecond})
 
 	if err == nil || !strings.Contains(err.Error(), "reading logs directory") {
 		t.Errorf("expected a reading error, got %v", err)
+	}
+}
+
+func TestShowLog_libraryLogIsPrintedAndNeverColored(t *testing.T) {
+	logsDir := t.TempDir()
+	runDir := filepath.Dir(writeSessionLog(t, logsDir, "2026-01-15T09-30-00", "session\n"))
+	// Text the release console would color, to show that it is left alone.
+	writeFile(t, filepath.Join(runDir, "kiwi.log"), "done    kiwi\n")
+	f := outputFile(t)
+
+	if err := showLog(context.Background(), f, showOptions{Mode: "always", LogsDir: logsDir, Library: "kiwi", Interval: time.Millisecond}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := contents(t, f); got != "done    kiwi\n" {
+		t.Errorf("got %q, want kiwi.log exactly as written", got)
+	}
+}
+
+func TestShowLog_libraryLogOfANamedRun(t *testing.T) {
+	logsDir := t.TempDir()
+	first := filepath.Dir(writeSessionLog(t, logsDir, "2026-01-15T09-30-00", "s\n"))
+	second := filepath.Dir(writeSessionLog(t, logsDir, "2026-01-16T10-00-00", "s\n"))
+	writeFile(t, filepath.Join(first, "kiwi-pom-update.log"), "first pom update\n")
+	writeFile(t, filepath.Join(second, "kiwi-pom-update.log"), "second pom update\n")
+	f := outputFile(t)
+
+	if err := showLog(context.Background(), f, showOptions{Mode: "never", LogsDir: logsDir, Run: "2026-01-15T09-30-00", Library: "kiwi-pom-update", Interval: time.Millisecond}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := contents(t, f); got != "first pom update\n" {
+		t.Errorf("got %q, want the named run's log", got)
+	}
+}
+
+func TestShowLog_missingLibraryLogListsTheOnesThatExist(t *testing.T) {
+	logsDir := t.TempDir()
+	runDir := filepath.Dir(writeSessionLog(t, logsDir, "2026-01-15T09-30-00", "s\n"))
+	writeFile(t, filepath.Join(runDir, "kiwi.log"), "x\n")
+	writeFile(t, filepath.Join(runDir, "kiwi-bom.log"), "x\n")
+
+	err := showLog(context.Background(), outputFile(t), showOptions{Mode: "never", LogsDir: logsDir, Library: "nope", Interval: time.Millisecond})
+
+	if err == nil || !strings.Contains(err.Error(), "no log nope.log in 2026-01-15T09-30-00") ||
+		!strings.Contains(err.Error(), "kiwi-bom") || strings.Contains(err.Error(), "session") {
+		t.Errorf("expected an error listing the library logs, got %v", err)
+	}
+}
+
+func TestShowLog_libraryNameMustNotLeaveTheRunDirectory(t *testing.T) {
+	logsDir := t.TempDir()
+	writeSessionLog(t, logsDir, "2026-01-15T09-30-00", "s\n")
+
+	for _, library := range []string{"../x", "..", "."} {
+		t.Run(library, func(t *testing.T) {
+			err := showLog(context.Background(), outputFile(t), showOptions{Mode: "never", LogsDir: logsDir, Library: library, Interval: time.Millisecond})
+
+			if err == nil || !strings.Contains(err.Error(), "invalid --library") {
+				t.Errorf("expected an invalid library error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestShowLog_missingLibraryLogWhenTheRunHasNone(t *testing.T) {
+	logsDir := t.TempDir()
+	writeSessionLog(t, logsDir, "2026-01-15T09-30-00", "s\n")
+
+	err := showLog(context.Background(), outputFile(t), showOptions{Mode: "never", LogsDir: logsDir, Library: "kiwi", Interval: time.Millisecond})
+
+	if err == nil || !strings.Contains(err.Error(), "it has no library logs") {
+		t.Errorf("expected a message that there are no library logs, got %v", err)
+	}
+}
+
+func TestShowLog_invalidColorModeIsAnErrorWithALibraryToo(t *testing.T) {
+	logsDir := t.TempDir()
+	writeSessionLog(t, logsDir, "2026-01-15T09-30-00", "s\n")
+
+	err := showLog(context.Background(), outputFile(t), showOptions{Mode: "sometimes", LogsDir: logsDir, Library: "kiwi", Interval: time.Millisecond})
+
+	if err == nil || !strings.Contains(err.Error(), "invalid --color") {
+		t.Errorf("expected an invalid mode error, got %v", err)
+	}
+}
+
+func writeFile(t *testing.T, path, text string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
