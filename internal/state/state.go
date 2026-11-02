@@ -30,6 +30,9 @@ type CompletedEntry struct {
 	Library     string    `json:"library"`
 	Version     string    `json:"version"`
 	CompletedAt time.Time `json:"completed_at"`
+	// DurationSeconds is how long the library's release took. It is zero for
+	// libraries that were skipped, and for entries written before it existed.
+	DurationSeconds int64 `json:"duration_seconds,omitempty"`
 }
 
 type FailedEntry struct {
@@ -85,6 +88,12 @@ func Resume(path string, prev *State) (*Writer, error) {
 // the existing entry is kept unchanged so the original completion time is
 // preserved and the file never accumulates duplicates.
 func (w *Writer) RecordCompleted(library, version string) error {
+	return w.RecordCompletedAfter(library, version, 0)
+}
+
+// RecordCompletedAfter is RecordCompleted for a library whose release took
+// elapsed, which is saved to the nearest second.
+func (w *Writer) RecordCompletedAfter(library, version string, elapsed time.Duration) error {
 	if w == nil {
 		return nil
 	}
@@ -96,9 +105,10 @@ func (w *Writer) RecordCompleted(library, version string) error {
 		}
 	}
 	w.state.Completed = append(w.state.Completed, CompletedEntry{
-		Library:     library,
-		Version:     version,
-		CompletedAt: time.Now().UTC(),
+		Library:         library,
+		Version:         version,
+		CompletedAt:     time.Now().UTC(),
+		DurationSeconds: int64(elapsed.Round(time.Second) / time.Second),
 	})
 	w.state.Failed = nil
 	return w.flush()
@@ -177,7 +187,11 @@ func Print(w io.Writer, s *State) {
 	} else {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, e := range s.Completed {
-			fmt.Fprintf(tw, "  %s\t%s\t%s\n", e.Library, e.Version, e.CompletedAt.Format(time.RFC3339))
+			fmt.Fprintf(tw, "  %s\t%s\t%s", e.Library, e.Version, e.CompletedAt.Format(time.RFC3339))
+			if e.DurationSeconds > 0 {
+				fmt.Fprintf(tw, "\t%s", time.Duration(e.DurationSeconds)*time.Second)
+			}
+			fmt.Fprintln(tw)
 		}
 		_ = tw.Flush()
 	}

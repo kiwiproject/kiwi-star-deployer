@@ -528,7 +528,9 @@ non-zero only if a library could not be checked.
 ### status
 
 Displays the state of the current or most recent release run: which libraries
-completed, at what version and time, and which library failed (if any).
+completed, at what version and time, how long each release took, and which
+library failed (if any). A library that was skipped, or that was completed by
+a run from before durations were recorded, shows no duration.
 
 ```sh
 kiwi-star-deployer status
@@ -540,8 +542,8 @@ Example output:
 Run: 2024-11-15T14:30:00Z
 
 Completed:
-  kiwi-parent          2.9.0  2024-11-15T14:31:22Z
-  kiwi-bom             1.3.0  2024-11-15T14:45:10Z
+  kiwi-parent          2.9.0  2024-11-15T14:31:22Z  7m12s
+  kiwi-bom             1.3.0  2024-11-15T14:45:10Z  5m48s
 
 Failed:
   library:  kiwi
@@ -660,6 +662,14 @@ run started, and a resumed run says the date on its `--- resumed at ... ---`
 line. A run that goes past midnight gets a `--- 2026-10-23 ---` line where the
 date changes. The per-library log files are copies of what Maven and the
 changelog script printed, so they have no added timestamps.
+
+The progress output also says how long things took. Each `done` line has the
+library's release time, such as `done    kiwi  (7m12s, log: ...)`, and each
+stage ends with a `Stage 2 took 31m4s` line, which includes the POM updates
+and CI waits that precede the stage's releases. At the end of a successful
+run, a table lists the libraries released, slowest first, and the last line
+is `Elapsed:`, the time since the run started. A run that fails prints
+`Elapsed:` too. For a resumed run, it covers only the resumed part.
 
 Set `log_retention_days` to automatically delete run directories older than
 that many days at the end of each successful release, without prompting. It's
