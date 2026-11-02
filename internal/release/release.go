@@ -6,8 +6,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
+	"text/tabwriter"
 	"time"
 
 	"github.com/kiwiproject/kiwi-star-deployer/internal/config"
@@ -103,6 +105,28 @@ type Options struct {
 	// (a previous run died before the changelog step), the changelog step is
 	// run for the already-released version before the skip is recorded.
 	SkipUnchanged bool
+	// Now returns the current time, which Execute uses to time the stages,
+	// the libraries and the run. It is called from several goroutines at
+	// once, so it must be safe for concurrent use. If nil, time.Now is used.
+	Now func() time.Time
+}
+
+func (o Options) now() time.Time {
+	if o.Now != nil {
+		return o.Now()
+	}
+	return time.Now()
+}
+
+// took formats a duration for the console, to the nearest second.
+func took(d time.Duration) string {
+	return d.Round(time.Second).String()
+}
+
+// libraryTiming is a released library's row in the summary at the end of a run.
+type libraryTiming struct {
+	name, version string
+	elapsed       time.Duration
 }
 
 type libraryResult struct {
@@ -113,6 +137,7 @@ type libraryResult struct {
 	failedStep  string
 	err         error
 	autoSkipped bool // true if skipped because no changes since last release
+	elapsed     time.Duration
 }
 
 // Execute runs all release stages in order. Libraries within a stage are
@@ -141,13 +166,17 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 	w = timestamp.New(io.MultiWriter(w, sessionLog))
 	// Log lines show only the time of day, so the date goes on the line that
 	// opens each stretch of the log: the start of a run, or a resume.
-	startedAt := time.Now().Format("2006-01-02 15:04:05 MST")
+	runStart := opts.now()
+	startedAt := runStart.Format("2006-01-02 15:04:05 MST")
 	if opts.LogDir != "" {
 		fmt.Fprintf(w, "\n--- resumed at %s ---\n\n", startedAt)
 	} else {
 		fmt.Fprintf(w, "Started: %s\n", startedAt)
 	}
 	fmt.Fprintf(w, "Logs: %s\n\n", logDir)
+	// This covers this run only; a resumed run does not add the time of the
+	// run it resumes.
+	defer func() { fmt.Fprintf(w, "\nElapsed: %s\n", took(opts.now().Sub(runStart))) }()
 
 	skipVersions, err := buildSkipVersions(w, opts, stages, ws, r)
 	if err != nil {
@@ -155,6 +184,7 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 	}
 
 	var totalReleased int
+	var timings []libraryTiming
 	// released accumulates every library's actual released (or skipped)
 	// version across all completed stages so far. A downstream library's POM
 	// update is deferred until immediately before its own stage, at which
@@ -164,6 +194,7 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 	// earlier stage that happened to release one of its dependencies.
 	released := make(map[string]plan.Entry)
 	for i, stage := range stages {
+		stageStart := opts.now()
 		if i > 0 {
 			if err := updateDownstreamPOMs(w, released, skipVersions, stage, ws, r, logDir, opts); err != nil {
 				return err
@@ -208,8 +239,9 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 				if res.autoSkipped {
 					fmt.Fprintf(w, "  skip    %s  (no changes since %s)\n", res.name, res.version)
 				} else {
-					fmt.Fprintf(w, "  done    %s  (log: %s)\n", res.name, res.logFile)
+					fmt.Fprintf(w, "  done    %s  (%s, log: %s)\n", res.name, took(res.elapsed), res.logFile)
 					totalReleased++
+					timings = append(timings, libraryTiming{res.name, res.version, res.elapsed})
 				}
 				// Auto-skipped entries use the detected released version, not
 				// the planned one.
@@ -221,13 +253,31 @@ func Execute(w io.Writer, stages [][]plan.Entry, ws *workspace.Workspace, r runn
 			}
 		}
 
+		fmt.Fprintf(w, "  Stage %d took %s\n", i+1, took(opts.now().Sub(stageStart)))
+
 		if failed {
 			return fmt.Errorf("stage %d failed; halting", i+1)
 		}
 	}
 
 	fmt.Fprintf(w, "\nReleased %d %s.\n", totalReleased, pluralize("library", "libraries", totalReleased))
+	printTimings(w, timings)
 	return nil
+}
+
+// printTimings writes how long each released library took, longest first so
+// the slow ones stand out.
+func printTimings(w io.Writer, timings []libraryTiming) {
+	if len(timings) == 0 {
+		return
+	}
+	sort.SliceStable(timings, func(i, j int) bool { return timings[i].elapsed > timings[j].elapsed })
+	fmt.Fprintln(w)
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	for _, t := range timings {
+		fmt.Fprintf(tw, "  %s\t%s\t%s\n", t.name, t.version, took(t.elapsed))
+	}
+	_ = tw.Flush()
 }
 
 // buildSkipVersions merges opts.Completed and opts.Skip into a single map of
@@ -598,9 +648,16 @@ func releaseStage(entries []plan.Entry, ws *workspace.Workspace, r runner.Runner
 		wg.Add(1)
 		go func(idx int, e plan.Entry) {
 			defer wg.Done()
+			start := opts.now()
 			res := releaseLibrary(e, ws, r, logDir, opts)
+			res.elapsed = opts.now().Sub(start)
+			if res.autoSkipped {
+				// A library that was only verified, not released, has no
+				// release time.
+				res.elapsed = 0
+			}
 			if res.err == nil {
-				_ = opts.StateWriter.RecordCompleted(res.name, res.version)
+				_ = opts.StateWriter.RecordCompletedAfter(res.name, res.version, res.elapsed)
 			}
 			results[idx] = res
 		}(i, entry)

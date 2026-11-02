@@ -18,6 +18,7 @@ import (
 	"github.com/kiwiproject/kiwi-star-deployer/internal/plan"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/release"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/runner"
+	"github.com/kiwiproject/kiwi-star-deployer/internal/state"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/version"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/workspace"
 )
@@ -2360,6 +2361,8 @@ func TestExecute_messageColors_success(t *testing.T) {
 		colortest.Want{Contains: "CI verify kiwi..."},
 		colortest.Want{Contains: "Logs: "},
 		colortest.Want{Contains: "Started: "},
+		colortest.Want{Contains: "Stage 1 took "},
+		colortest.Want{Contains: "Elapsed: "},
 	)
 }
 
@@ -2468,5 +2471,174 @@ func TestExecute_sessionLogAppendsOnResume(t *testing.T) {
 	}
 	if !strings.Contains(content, "Stage 1:") {
 		t.Errorf("expected new content after separator in session.log:\n%s", content)
+	}
+}
+
+// steppingClock returns a time that is step later on every reading, so the
+// time between two readings depends only on how many were taken in between.
+func steppingClock(step time.Duration) func() time.Time {
+	var mu sync.Mutex
+	now := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
+	return func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		now = now.Add(step)
+		return now
+	}
+}
+
+func singleLibraryStages() [][]plan.Entry {
+	return makeStages(
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 1, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+}
+
+func TestExecute_reportsHowLongEachPartTook(t *testing.T) {
+	ws := workspace.New(t.TempDir(), &prepareSuccessRunner{})
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.5.0")
+	opts := defaultOpts()
+	opts.Now = steppingClock(90 * time.Second)
+
+	var out bytes.Buffer
+	if err := release.Execute(&out, singleLibraryStages(), ws, fr, t.TempDir(), opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Readings: run start, stage start, library start, library end, stage
+	// end, run end. So the library took 1 step, the stage 3 and the run 5.
+	got := out.String()
+	for _, want := range []string{
+		"done    kiwi  (1m30s, log: ",
+		"Stage 1 took 4m30s",
+		"Elapsed: 7m30s",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in:\n%s", want, got)
+		}
+	}
+	if !regexp.MustCompile(`Released 1 library\.\n(?s:.*)kiwi +2\.5\.1 +1m30s(?s:.*)Elapsed:`).MatchString(got) {
+		t.Errorf("expected the summary table between 'Released' and 'Elapsed' in:\n%s", got)
+	}
+}
+
+func TestExecute_aFailedRunStillSaysHowLongItTook(t *testing.T) {
+	ws := workspace.New(t.TempDir(), &prepareSuccessRunner{})
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: "v2.5.0"}, nil) // git describe succeeds
+	fr.AddResponse(nil, errors.New("exit status 1"))      // mvn fails
+	opts := defaultOpts()
+	opts.Now = steppingClock(time.Minute)
+
+	var out bytes.Buffer
+	if err := release.Execute(&out, singleLibraryStages(), ws, fr, t.TempDir(), opts); err == nil {
+		t.Fatal("expected the release to fail")
+	}
+
+	got := out.String()
+	for _, want := range []string{"Stage 1 took 3m0s", "Elapsed: 5m0s"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Released") {
+		t.Errorf("a failed run should not say it released anything:\n%s", got)
+	}
+}
+
+func TestExecute_savesTheLibraryDurationInTheState(t *testing.T) {
+	ws := workspace.New(t.TempDir(), &prepareSuccessRunner{})
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.5.0")
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	sw, err := state.New(statePath, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := defaultOpts()
+	opts.StateWriter = sw
+	opts.Now = steppingClock(90 * time.Second)
+
+	if err := release.Execute(io.Discard, singleLibraryStages(), ws, fr, t.TempDir(), opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	s, err := state.Load(statePath)
+	if err != nil || len(s.Completed) != 1 || s.Completed[0].DurationSeconds != 90 {
+		t.Errorf("got (%+v, %v), want one completed library that took 90 seconds", s, err)
+	}
+}
+
+func TestExecute_aLibraryThatWasOnlyVerifiedHasNoDuration(t *testing.T) {
+	ws := workspace.New(t.TempDir(), &prepareSuccessRunner{})
+	fr := &runner.FakeRunner{}
+	fr.AddResponse(&runner.Result{Stdout: "abc1234 [maven-release-plugin] prepare for next development iteration\ndef5678 [maven-release-plugin] prepare release v2.5.0\n"}, nil)
+	fr.AddResponse(&runner.Result{Stdout: "v2.5.0\n"}, nil)
+	fr.AddResponse(&runner.Result{Stdout: "{}"}, nil)
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	sw, err := state.New(statePath, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := defaultOpts()
+	opts.SkipUnchanged = true
+	opts.StateWriter = sw
+	opts.Now = steppingClock(time.Minute)
+
+	var out bytes.Buffer
+	if err := release.Execute(&out, singleLibraryStages(), ws, fr, t.TempDir(), opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "skip    kiwi  (no changes since 2.5.0)") {
+		t.Errorf("the skip line should be unchanged:\n%s", got)
+	}
+	if regexp.MustCompile(`kiwi +2\.5\.1 +\d`).MatchString(got) {
+		t.Errorf("no summary table expected when nothing was released:\n%s", got)
+	}
+	s, err := state.Load(statePath)
+	if err != nil || len(s.Completed) != 1 || s.Completed[0].DurationSeconds != 0 {
+		t.Errorf("got (%+v, %v), want one completed library with no duration", s, err)
+	}
+}
+
+func TestExecute_summaryListsTheSlowestLibraryFirst(t *testing.T) {
+	ws := workspace.New(t.TempDir(), &prepareSuccessRunner{})
+	fr := &runner.FakeRunner{}
+	addLibraryResponses(fr, "v2.9.0")                       // kiwi-parent
+	addPOMUpdateResponses(fr)                               // kiwi POM update
+	fr.AddResponse(&runner.Result{Stdout: "abc123\n"}, nil) // git rev-parse HEAD
+	addLibraryResponses(fr, "v2.5.0")                       // kiwi
+	stages := makeStages(
+		plan.Entry{Name: "kiwi-parent", Repo: "kiwiproject/kiwi-parent", Stage: 1, VersionPlan: mustPlan("kiwi-parent", "3.0.0-SNAPSHOT")},
+		plan.Entry{Name: "kiwi", Repo: "kiwiproject/kiwi", Stage: 2, DependsOn: []string{"kiwi-parent"}, VersionPlan: mustPlan("kiwi", "2.5.1-SNAPSHOT")},
+	)
+	opts := defaultOpts()
+	opts.CIChecker = &fakeCIChecker{}
+	opts.CIMaxWait = time.Minute
+	opts.CIPollInterval = time.Millisecond
+	// Each library takes one reading pair, so make later readings jump further
+	// and the second library look slower.
+	var mu sync.Mutex
+	now, step := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC), time.Minute
+	opts.Now = func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		now = now.Add(step)
+		step += time.Minute
+		return now
+	}
+
+	var out bytes.Buffer
+	if err := release.Execute(&out, stages, ws, fr, t.TempDir(), opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	table := out.String()[strings.Index(out.String(), "Released 2 libraries."):]
+	kiwi := regexp.MustCompile(`kiwi +2\.5\.1`).FindStringIndex(table)
+	parent := regexp.MustCompile(`kiwi-parent +3\.0\.0`).FindStringIndex(table)
+	if kiwi == nil || parent == nil || kiwi[0] > parent[0] {
+		t.Errorf("expected both libraries in the summary, the slower one (kiwi) first:\n%s", table)
 	}
 }

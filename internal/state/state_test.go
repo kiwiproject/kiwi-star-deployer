@@ -2,6 +2,7 @@ package state_test
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -411,5 +412,83 @@ func TestPrint_withNoFailed(t *testing.T) {
 	}
 	if strings.Contains(out, "Failed:") {
 		t.Errorf("unexpected 'Failed:' section when no failure:\n%s", out)
+	}
+}
+
+func TestWriter_RecordCompletedAfter_savesTheDurationInSeconds(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	w, err := state.New(path, "run-1")
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+
+	if err := w.RecordCompletedAfter("kiwi", "5.0.0", 7*time.Minute+12*time.Second+400*time.Millisecond); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	if err := w.RecordCompleted("kiwi-bom", "2.0.0"); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+
+	s, err := state.Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := s.Completed[0].DurationSeconds; got != 432 {
+		t.Errorf("duration: got %d, want 432", got)
+	}
+	if got := s.Completed[1].DurationSeconds; got != 0 {
+		t.Errorf("a library recorded without a duration should have none, got %d", got)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(data), "duration_seconds") != 1 {
+		t.Errorf("only the entry with a duration should have the field:\n%s", data)
+	}
+}
+
+func TestLoad_stateWrittenBeforeDurationsExisted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	old := `{"run_id":"r","completed":[{"library":"kiwi","version":"1.0.0","completed_at":"2025-11-15T14:31:22Z"}]}`
+	if err := os.WriteFile(path, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := state.Load(path)
+
+	if err != nil || len(s.Completed) != 1 || s.Completed[0].DurationSeconds != 0 {
+		t.Errorf("got (%+v, %v), want one entry with no duration", s, err)
+	}
+}
+
+func TestPrint_showsTheDurationOnlyWhenThereIsOne(t *testing.T) {
+	at := time.Date(2025, 11, 15, 14, 31, 22, 0, time.UTC)
+	s := &state.State{
+		RunID: "r",
+		Completed: []state.CompletedEntry{
+			{Library: "kiwi-parent", Version: "3.1.0", CompletedAt: at, DurationSeconds: 3725},
+			{Library: "kiwi-bom", Version: "2.4.0", CompletedAt: at},
+		},
+	}
+
+	var buf bytes.Buffer
+	state.Print(&buf, s)
+
+	lines := strings.Split(buf.String(), "\n")
+	var parent, bom string
+	for _, l := range lines {
+		switch {
+		case strings.Contains(l, "kiwi-parent"):
+			parent = l
+		case strings.Contains(l, "kiwi-bom"):
+			bom = l
+		}
+	}
+	if !strings.HasSuffix(parent, "1h2m5s") {
+		t.Errorf("expected the duration at the end of %q", parent)
+	}
+	if !strings.HasSuffix(bom, "Z") {
+		t.Errorf("a library without a duration should end at its completion time, got %q", bom)
 	}
 }
