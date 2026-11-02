@@ -8,8 +8,10 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/kiwiproject/kiwi-star-deployer/internal/color"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/config"
 	"github.com/kiwiproject/kiwi-star-deployer/internal/state"
 	"github.com/spf13/cobra"
@@ -24,12 +26,19 @@ var logsShowCmd = &cobra.Command{
 	Long: `Print the session log of a release run, colored like the release console.
 The run is named by its directory under the logs directory or by the run ID
 that "logs list" prints, and defaults to the latest run. With --follow the
-command keeps printing new output until it is interrupted with Ctrl-C.`,
+command keeps printing new output until it is interrupted with Ctrl-C.
+
+With --library, print a library's own log instead (for example kiwi, or
+kiwi-pom-update for its POM update). Those are the raw Maven and git output,
+so they are never colored.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runLogsShow,
 }
 
-var showFollow bool
+var (
+	showFollow  bool
+	showLibrary string
+)
 
 func runLogsShow(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load(configPath)
@@ -43,13 +52,27 @@ func runLogsShow(cmd *cobra.Command, args []string) error {
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 	defer stop()
-	return showLog(ctx, os.Stdout, colorMode, cfg.Settings.LogsDir(), run, showFollow, followInterval)
+	return showLog(ctx, os.Stdout, colorMode, cfg.Settings.LogsDir(), run, showLibrary, showFollow, followInterval)
 }
 
 // showLog prints the session log of run (the latest run when empty) to f, in
-// color when mode and the environment call for it. When follow is set it keeps
-// checking for new output every interval until ctx is done.
-func showLog(ctx context.Context, f *os.File, mode, logsDir, run string, follow bool, interval time.Duration) error {
+// color when mode and the environment call for it. When library is set it
+// prints that log of the run instead, always uncolored. When follow is set it
+// keeps checking for new output every interval until ctx is done.
+func showLog(ctx context.Context, f *os.File, mode, logsDir, run, library string, follow bool, interval time.Duration) error {
+	logName := "session.log"
+	if library != "" {
+		if filepath.Base(library) != library || library == "." || library == ".." {
+			return fmt.Errorf("invalid --library %q: use a log name such as kiwi", library)
+		}
+		// Check the mode even though it is not used, so a bad value is an
+		// error whether or not --library is given.
+		if _, err := color.ParseMode(mode); err != nil {
+			return err
+		}
+		logName, mode = library+".log", "never"
+	}
+
 	out, flush, err := consoleOutput(f, mode)
 	if err != nil {
 		return err
@@ -60,9 +83,15 @@ func showLog(ctx context.Context, f *os.File, mode, logsDir, run string, follow 
 	if err != nil {
 		return err
 	}
-	log, err := os.Open(filepath.Join(dir, "session.log"))
+	log, err := os.Open(filepath.Join(dir, logName))
+	if errors.Is(err, os.ErrNotExist) && library != "" {
+		if names := libraryLogs(dir); len(names) > 0 {
+			return fmt.Errorf("no log %s in %s; the logs there are: %s", logName, filepath.Base(dir), strings.Join(names, ", "))
+		}
+		return fmt.Errorf("no log %s in %s; it has no library logs", logName, filepath.Base(dir))
+	}
 	if err != nil {
-		return fmt.Errorf("opening the session log: %w", err)
+		return fmt.Errorf("opening %s: %w", logName, err)
 	}
 	defer func() { _ = log.Close() }()
 
@@ -81,6 +110,19 @@ func showLog(ctx context.Context, f *os.File, mode, logsDir, run string, follow 
 		case <-time.After(interval):
 		}
 	}
+}
+
+// libraryLogs returns the names, without the .log suffix, of the logs in a run
+// directory other than the session log.
+func libraryLogs(dir string) []string {
+	matches, _ := filepath.Glob(filepath.Join(dir, "*.log"))
+	var names []string
+	for _, m := range matches {
+		if name := strings.TrimSuffix(filepath.Base(m), ".log"); name != "session" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // resolveRun returns the directory of the named run: the latest run when run
@@ -120,5 +162,6 @@ func resolveRun(logsDir, run string) (string, error) {
 func init() {
 	logsCmd.AddCommand(logsShowCmd)
 	logsShowCmd.Flags().BoolVarP(&showFollow, "follow", "f", false, "keep printing new output until interrupted")
+	logsShowCmd.Flags().StringVar(&showLibrary, "library", "", "print this library's log (for example kiwi) instead of the session log")
 	addColorFlag(logsShowCmd)
 }
