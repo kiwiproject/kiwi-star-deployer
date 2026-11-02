@@ -52,14 +52,32 @@ func runLogsShow(cmd *cobra.Command, args []string) error {
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 	defer stop()
-	return showLog(ctx, os.Stdout, colorMode, cfg.Settings.LogsDir(), run, showLibrary, showFollow, followInterval)
+	return showLog(ctx, os.Stdout, showOptions{
+		Mode:     colorMode,
+		LogsDir:  cfg.Settings.LogsDir(),
+		Run:      run,
+		Library:  showLibrary,
+		Follow:   showFollow,
+		Interval: followInterval,
+	})
 }
 
-// showLog prints the session log of run (the latest run when empty) to f, in
-// color when mode and the environment call for it. When library is set it
-// prints that log of the run instead, always uncolored. When follow is set it
-// keeps checking for new output every interval until ctx is done.
-func showLog(ctx context.Context, f *os.File, mode, logsDir, run, library string, follow bool, interval time.Duration) error {
+// showOptions says what showLog prints and how.
+type showOptions struct {
+	Mode    string // when to color: auto, always or never
+	LogsDir string // the directory that holds the run directories
+	Run     string // the run to show; the latest run when empty
+	Library string // a library's log to show instead of the session log
+	Follow  bool   // keep printing new output until the context is done
+	// Interval is how often to check for new output when following.
+	Interval time.Duration
+}
+
+// showLog prints the session log of a run to f, in color when o.Mode and the
+// environment call for it. When o.Library is set it prints that log of the run
+// instead, always uncolored.
+func showLog(ctx context.Context, f *os.File, o showOptions) error {
+	library, mode := o.Library, o.Mode
 	logName := "session.log"
 	if library != "" {
 		if filepath.Base(library) != library || library == "." || library == ".." {
@@ -79,7 +97,7 @@ func showLog(ctx context.Context, f *os.File, mode, logsDir, run, library string
 	}
 	defer flush()
 
-	dir, err := resolveRun(logsDir, run)
+	dir, err := resolveRun(o.LogsDir, o.Run)
 	if err != nil {
 		return err
 	}
@@ -101,13 +119,13 @@ func showLog(ctx context.Context, f *os.File, mode, logsDir, run, library string
 		if _, err := io.Copy(out, log); err != nil {
 			return fmt.Errorf("reading the session log: %w", err)
 		}
-		if !follow {
+		if !o.Follow {
 			return nil
 		}
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(interval):
+		case <-time.After(o.Interval):
 		}
 	}
 }
